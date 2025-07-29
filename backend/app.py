@@ -33,11 +33,16 @@ app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=24)
 # 확장 초기화
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
+# 기존 CORS 설정을 찾아서 이렇게 수정
 CORS(app, 
-     origins=['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:5000'], 
-     supports_credentials=True,
-     allow_headers=['Content-Type', 'Authorization'],
-     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
+     resources={
+         r"/api/*": {
+             "origins": ["http://localhost:3000", "http://127.0.0.1:3000"],
+             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+             "allow_headers": ["Content-Type", "Authorization"]
+         }
+     },
+     supports_credentials=True)
 
 # API 키 설정
 NOTION_TOKEN = "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"
@@ -338,13 +343,14 @@ class AIInsight(db.Model):
     insight_type = db.Column(db.String(50), nullable=False)  # daily_summary, weekly_analysis, suggestion
     title = db.Column(db.String(200))
     content = db.Column(db.Text, nullable=False)
-    metadata = db.Column(db.Text)  # JSON object
+    insight_metadata = db.Column(db.Text)  # JSON object - metadata 대신 insight_metadata 사용
     confidence_score = db.Column(db.Float)  # 0.0 to 1.0
     is_read = db.Column(db.Boolean, default=False)
     is_actionable = db.Column(db.Boolean, default=False)
     
     # 타임스탬프
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     expires_at = db.Column(db.DateTime)
     
     # 외래키
@@ -356,7 +362,7 @@ class AIInsight(db.Model):
             'insight_type': self.insight_type,
             'title': self.title,
             'content': self.content,
-            'metadata': json.loads(self.metadata) if self.metadata else {},
+            'metadata': json.loads(self.insight_metadata) if self.insight_metadata else {},
             'confidence_score': self.confidence_score,
             'is_read': self.is_read,
             'is_actionable': self.is_actionable,
@@ -404,55 +410,116 @@ class FocusSession(db.Model):
             'ended_at': self.ended_at.isoformat() if self.ended_at else None
         }
 
-# Notion API 통합
-class NotionClient:
-    def __init__(self, token: str):
-        self.token = token
-        self.base_url = "https://api.notion.com/v1"
-        self.headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "Notion-Version": "2022-06-28"
-        }
-    
-    def create_page(self, database_id: str, properties: dict, content: str = ""):
-        """Notion 데이터베이스에 새 페이지 생성"""
+# AI 서비스
+class AIService:
+    @staticmethod
+    def generate_daily_insights(user_id: int) -> dict:
+        """일일 AI 인사이트 생성"""
         try:
-            url = f"{self.base_url}/pages"
+            user = User.query.get(user_id)
+            if not user or not user.ai_coaching_enabled:
+                return None
             
-            # 콘텐츠를 블록으로 변환
-            children = []
-            if content:
-                # 간단한 텍스트 블록으로 변환
-                paragraphs = content.split('\n\n')
-                for paragraph in paragraphs[:10]:  # 최대 10개 문단
-                    if paragraph.strip():
-                        children.append({
-                            "object": "block",
-                            "type": "paragraph",
-                            "paragraph": {
-                                "rich_text": [{
-                                    "type": "text",
-                                    "text": {"content": paragraph.strip()[:2000]}  # 2000자 제한
-                                }]
-                            }
-                        })
+            # 최근 7일 데이터 수집
+            week_ago = datetime.utcnow() - timedelta(days=7)
             
-            data = {
-                "parent": {"database_id": database_id},
-                "properties": properties,
-                "children": children
-            }
+            recent_tasks = Task.query.filter(
+                Task.user_id == user_id,
+                Task.updated_at >= week_ago
+            ).all()
             
-            response = requests.post(url, headers=self.headers, json=data)
-            response.raise_for_status()
-            return response.json()
+            recent_notes = Note.query.filter(
+                Note.user_id == user_id,
+                Note.updated_at >= week_ago
+            ).all()
+            
+            focus_sessions = FocusSession.query.filter(
+                FocusSession.user_id == user_id,
+                FocusSession.created_at >= week_ago
+            ).all()
+            
+            # 통계 계산
+            completed_tasks = [t for t in recent_tasks if t.status == 'completed']
+            completion_rate = (len(completed_tasks) / max(1, len(recent_tasks))) * 100
+            
+            total_focus_time = sum(s.actual_duration for s in focus_sessions if s.actual_duration)
+            avg_focus_score = sum(s.focus_score for s in focus_sessions if s.focus_score) / max(1, len(focus_sessions))
+            
+            # OpenAI로 개인화된 분석 생성
+            prompt = f"""
+당신은 전문 생산성 코치입니다. 다음 사용자 데이터를 분석하여 한국어로 인사이트를 제공해주세요:
+
+사용자 정보:
+- 이름: {user.username}
+- 계획: {user.plan}
+- 근무시간: {user.work_start_time} - {user.work_end_time}
+
+최근 7일 데이터:
+- 총 작업: {len(recent_tasks)}개
+- 완료된 작업: {len(completed_tasks)}개
+- 완료율: {completion_rate:.1f}%
+- 작성한 노트: {len(recent_notes)}개
+- 집중 세션: {len(focus_sessions)}개
+- 총 집중 시간: {total_focus_time}분
+- 평균 집중도: {avg_focus_score:.1f}/10
+
+다음 JSON 형식으로 응답해주세요:
+{{
+    "daily_summary": "오늘의 생산성 요약 (친근한 톤, 2-3문장)",
+    "focus_score": 집중도점수(1-10),
+    "productivity_trend": "상승/하락/유지",
+    "suggestions": [
+        "구체적인 개선 제안 1",
+        "구체적인 개선 제안 2", 
+        "구체적인 개선 제안 3"
+    ],
+    "achievements": [
+        "이번 주 성과 1",
+        "이번 주 성과 2"
+    ],
+    "next_actions": [
+        "다음에 할 일 추천 1",
+        "다음에 할 일 추천 2"
+    ],
+    "motivation_message": "격려 메시지"
+}}
+"""
+            
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=800,
+                temperature=0.7
+            )
+            
+            ai_content = json.loads(response.choices[0].message.content)
+            
+            # 인사이트 저장
+            insight = AIInsight(
+                user_id=user_id,
+                insight_type='daily_summary',
+                title=f"{user.username}님의 일일 생산성 리포트",
+                content=json.dumps(ai_content, ensure_ascii=False),
+                confidence_score=0.85,
+                insight_metadata=json.dumps({
+                    'completion_rate': completion_rate,
+                    'focus_time': total_focus_time,
+                    'tasks_count': len(recent_tasks),
+                    'notes_count': len(recent_notes)
+                }, ensure_ascii=False)
+            )
+            
+            db.session.add(insight)
+            db.session.commit()
+            
+            return ai_content
             
         except Exception as e:
             logger.error(f"AI 인사이트 생성 실패: {e}")
             # 기본 인사이트 반환
+            user = User.query.get(user_id)
             return {
-                "daily_summary": f"{user.username}님, 오늘도 수고하셨습니다! 꾸준한 노력이 성과로 이어지고 있어요.",
+                "daily_summary": f"{user.username if user else '사용자'}님, 오늘도 수고하셨습니다! 꾸준한 노력이 성과로 이어지고 있어요.",
                 "focus_score": 7.5,
                 "productivity_trend": "유지",
                 "suggestions": [
@@ -529,9 +596,82 @@ class NotionClient:
             logger.error(f"작업 시간 예측 실패: {e}")
             return 2.0  # 기본값
 
-# 클라이언트 인스턴스
-notion_client = NotionClient(NOTION_TOKEN) if NOTION_TOKEN else None
-github_client = GitHubClient(GITHUB_TOKEN) if GITHUB_TOKEN else None
+# Notion API 통합
+class NotionClient:
+    def __init__(self, token: str):
+        self.token = token
+        self.base_url = "https://api.notion.com/v1"
+        self.headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Notion-Version": "2022-06-28"
+        }
+
+    def create_page(self, database_id: str, properties: dict, content: str = ""):
+        """Notion 데이터베이스에 새 페이지 생성"""
+        try:
+            url = f"{self.base_url}/pages"
+            children = []
+
+            if content:
+                paragraphs = content.split('\n\n')
+                for paragraph in paragraphs[:10]:
+                    if paragraph.strip():
+                        children.append({
+                            "object": "block",
+                            "type": "paragraph",
+                            "paragraph": {
+                                "rich_text": [{
+                                    "type": "text",
+                                    "text": {"content": paragraph.strip()[:2000]}
+                                }]
+                            }
+                        })
+
+            data = {
+                "parent": {"database_id": database_id},
+                "properties": properties,
+                "children": children
+            }
+
+            response = requests.post(url, headers=self.headers, json=data)
+            response.raise_for_status()
+            return response.json()
+
+        except Exception as e:
+            logger.error(f"Notion 페이지 생성 실패: {e}")
+            return None
+
+    def sync_note_to_notion(self, note):
+        """노트를 Notion으로 동기화"""
+        try:
+            properties = {
+                "Name": {
+                    "title": [{"text": {"content": note.title}}]
+                },
+                "Tags": {
+                    "multi_select": [{"name": tag} for tag in (json.loads(note.tags) if note.tags else [])]
+                },
+                "Type": {
+                    "select": {"name": note.note_type}
+                },
+                "Status": {
+                    "select": {"name": "Draft" if not note.is_public else "Published"}
+                },
+                "Created": {
+                    "date": {"start": note.created_at.isoformat()}
+                }
+            }
+
+            result = self.create_page(NOTION_DB_ID, properties, note.content)
+            if result:
+                note.notion_page_id = result['id']
+                db.session.commit()
+                return result
+
+        except Exception as e:
+            logger.error(f"❌ Notion 동기화 실패: {e}")
+            return None
 
 # 유틸리티 함수
 def handle_errors(f):
@@ -571,6 +711,725 @@ def validate_json(required_fields):
             return f(*args, **kwargs)
         return decorated_function
     return decorator
+
+@app.route('/api/integrations/github/repos', methods=['GET'])
+@jwt_required()
+@handle_errors
+def get_github_repos():
+    if not github_client:
+        return jsonify({
+            'success': False,
+            'message': 'GitHub 통합이 설정되지 않았습니다.'
+        }), 400
+    
+    repos = github_client.get_user_repos()
+    return jsonify({
+        'success': True,
+        'data': repos[:20]  # 최대 20개 리포지토리
+    })
+
+@app.route('/api/integrations/github/issue', methods=['POST'])
+@jwt_required()
+@handle_errors
+@validate_json(['repo', 'title', 'body'])
+def create_github_issue():
+    if not github_client:
+        return jsonify({
+            'success': False,
+            'message': 'GitHub 통합이 설정되지 않았습니다.'
+        }), 400
+    
+    data = request.get_json()
+    
+    result = github_client.create_issue(
+        repo=data['repo'],
+        title=data['title'],
+        body=data['body'],
+        labels=data.get('labels', [])
+    )
+    
+    if result:
+        return jsonify({
+            'success': True,
+            'message': 'GitHub 이슈가 생성되었습니다.',
+            'issue_url': result['html_url']
+        })
+    
+    return jsonify({
+        'success': False,
+        'message': 'GitHub 이슈 생성에 실패했습니다.'
+    }), 500
+
+# 검색 라우트
+@app.route('/api/search', methods=['GET'])
+@jwt_required()
+@handle_errors
+def search():
+    user_id = get_jwt_identity()
+    query = request.args.get('q', '').strip()
+    
+    if not query:
+        return jsonify({
+            'success': False,
+            'message': '검색어를 입력해주세요.'
+        }), 400
+    
+    # 노트 검색
+    notes = Note.query.filter(
+        Note.user_id == user_id,
+        Note.is_archived == False,
+        db.or_(
+            Note.title.contains(query),
+            Note.content.contains(query)
+        )
+    ).limit(10).all()
+    
+    # 작업 검색
+    tasks = Task.query.filter(
+        Task.user_id == user_id,
+        db.or_(
+            Task.title.contains(query),
+            Task.description.contains(query)
+        )
+    ).limit(10).all()
+    
+    # 이벤트 검색
+    events = Event.query.filter(
+        Event.user_id == user_id,
+        db.or_(
+            Event.title.contains(query),
+            Event.description.contains(query)
+        )
+    ).limit(10).all()
+    
+    return jsonify({
+        'success': True,
+        'data': {
+            'query': query,
+            'results': {
+                'notes': [note.to_dict() for note in notes],
+                'tasks': [task.to_dict() for task in tasks],
+                'events': [event.to_dict() for event in events]
+            },
+            'total_results': len(notes) + len(tasks) + len(events)
+        }
+    })
+
+# 통계 라우트
+@app.route('/api/analytics/productivity', methods=['GET'])
+@jwt_required()
+@handle_errors
+def get_productivity_analytics():
+    user_id = get_jwt_identity()
+    
+    # 기간 설정 (기본: 최근 30일)
+    days = request.args.get('days', 30, type=int)
+    start_date = datetime.utcnow() - timedelta(days=days)
+    
+    # 일별 통계 계산
+    daily_stats = []
+    for i in range(days):
+        date = start_date + timedelta(days=i)
+        date_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
+        date_end = date_start + timedelta(days=1)
+        
+        # 해당 날짜의 통계
+        completed_tasks = Task.query.filter(
+            Task.user_id == user_id,
+            Task.completed_at >= date_start,
+            Task.completed_at < date_end
+        ).count()
+        
+        created_notes = Note.query.filter(
+            Note.user_id == user_id,
+            Note.created_at >= date_start,
+            Note.created_at < date_end
+        ).count()
+        
+        focus_sessions = FocusSession.query.filter(
+            FocusSession.user_id == user_id,
+            FocusSession.created_at >= date_start,
+            FocusSession.created_at < date_end,
+            FocusSession.status == 'completed'
+        ).all()
+        
+        total_focus_time = sum(s.actual_duration for s in focus_sessions if s.actual_duration)
+        avg_focus_score = sum(s.focus_score for s in focus_sessions if s.focus_score) / max(1, len(focus_sessions))
+        
+        daily_stats.append({
+            'date': date.strftime('%Y-%m-%d'),
+            'completed_tasks': completed_tasks,
+            'created_notes': created_notes,
+            'focus_sessions': len(focus_sessions),
+            'total_focus_time': total_focus_time,
+            'avg_focus_score': round(avg_focus_score, 1) if focus_sessions else 0
+        })
+    
+    # 전체 통계
+    total_tasks = Task.query.filter_by(user_id=user_id).count()
+    completed_tasks = Task.query.filter_by(user_id=user_id, status='completed').count()
+    total_notes = Note.query.filter_by(user_id=user_id, is_archived=False).count()
+    
+    # 카테고리별 통계
+    task_categories = db.session.query(
+        Task.category, 
+        db.func.count(Task.id)
+    ).filter_by(user_id=user_id).group_by(Task.category).all()
+    
+    note_types = db.session.query(
+        Note.note_type,
+        db.func.count(Note.id)
+    ).filter_by(user_id=user_id, is_archived=False).group_by(Note.note_type).all()
+    
+    return jsonify({
+        'success': True,
+        'data': {
+            'daily_stats': daily_stats,
+            'summary': {
+                'total_tasks': total_tasks,
+                'completed_tasks': completed_tasks,
+                'completion_rate': (completed_tasks / max(1, total_tasks)) * 100,
+                'total_notes': total_notes,
+                'avg_productivity_score': sum(day['completed_tasks'] for day in daily_stats) / max(1, days)
+            },
+            'categories': {
+                'tasks': [{'name': cat[0] or 'Uncategorized', 'count': cat[1]} for cat in task_categories],
+                'notes': [{'name': nt[0], 'count': nt[1]} for nt in note_types]
+            }
+        }
+    })
+
+# 설정 라우트
+@app.route('/api/settings', methods=['GET'])
+@jwt_required()
+@handle_errors
+def get_settings():
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
+    
+    return jsonify({
+        'success': True,
+        'data': {
+            'profile': {
+                'username': user.username,
+                'email': user.email,
+                'avatar_url': user.avatar_url,
+                'plan': user.plan
+            },
+            'preferences': {
+                'theme': user.theme,
+                'timezone': user.timezone,
+                'language': user.language
+            },
+            'productivity': {
+                'work_start_time': user.work_start_time,
+                'work_end_time': user.work_end_time,
+                'break_duration': user.break_duration,
+                'focus_session_duration': user.focus_session_duration
+            },
+            'ai': {
+                'coaching_enabled': user.ai_coaching_enabled,
+                'notifications_enabled': user.ai_notifications_enabled,
+                'analysis_frequency': user.ai_analysis_frequency
+            },
+            'integrations': {
+                'notion_enabled': user.notion_integration_enabled,
+                'github_enabled': user.github_integration_enabled
+            }
+        }
+    })
+
+@app.route('/api/settings', methods=['PUT'])
+@jwt_required()
+@handle_errors
+def update_settings():
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
+    data = request.get_json()
+    
+    # 업데이트 가능한 설정들
+    settings_map = {
+        'theme': 'theme',
+        'timezone': 'timezone',
+        'language': 'language',
+        'work_start_time': 'work_start_time',
+        'work_end_time': 'work_end_time',
+        'break_duration': 'break_duration',
+        'focus_session_duration': 'focus_session_duration',
+        'ai_coaching_enabled': 'ai_coaching_enabled',
+        'ai_notifications_enabled': 'ai_notifications_enabled',
+        'ai_analysis_frequency': 'ai_analysis_frequency'
+    }
+    
+    for key, attr in settings_map.items():
+        if key in data:
+            setattr(user, attr, data[key])
+    
+    user.updated_at = datetime.utcnow()
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'message': '설정이 업데이트되었습니다.'
+    })
+
+# 템플릿 라우트
+@app.route('/api/templates', methods=['GET'])
+@jwt_required()
+@handle_errors
+def get_templates():
+    """노트 템플릿 목록 조회"""
+    user_id = get_jwt_identity()
+    
+    # 사용자 커스텀 템플릿
+    user_templates = Note.query.filter_by(
+        user_id=user_id,
+        is_template=True
+    ).all()
+    
+    # 기본 템플릿들
+    default_templates = [
+        {
+            'id': 'meeting-notes',
+            'title': '회의록 템플릿',
+            'emoji': '👥',
+            'content': """# 회의록
+
+## 📅 회의 정보
+- **날짜**: 
+- **시간**: 
+- **참석자**: 
+- **장소**: 
+
+## 📋 안건
+1. 
+2. 
+3. 
+
+## 💡 주요 논의사항
+
+
+## ✅ 결정사항
+
+
+## 📝 액션 아이템
+- [ ] 
+- [ ] 
+- [ ] 
+
+## 📌 다음 회의
+- **날짜**: 
+- **안건**: 
+""",
+            'category': 'meeting'
+        },
+        {
+            'id': 'daily-planning',
+            'title': '일일 계획 템플릿',
+            'emoji': '📋',
+            'content': """# 오늘의 계획
+
+## 🎯 주요 목표 (3가지)
+1. 
+2. 
+3. 
+
+## ⏰ 시간 계획
+- **09:00 - 10:00**: 
+- **10:00 - 12:00**: 
+- **13:00 - 15:00**: 
+- **15:00 - 17:00**: 
+- **17:00 - 18:00**: 
+
+## 📞 미팅/약속
+
+
+## 🧠 학습/개발
+
+
+## 💭 메모/아이디어
+
+
+## 🌟 오늘의 성과
+- 
+- 
+- 
+""",
+            'category': 'planning'
+        },
+        {
+            'id': 'project-brief',
+            'title': '프로젝트 기획서 템플릿',
+            'emoji': '🚀',
+            'content': """# 프로젝트 기획서
+
+## 📖 프로젝트 개요
+**프로젝트명**: 
+**기간**: 
+**담당자**: 
+
+## 🎯 목표
+### 주요 목표
+
+### 성공 지표
+
+## 📊 현황 분석
+### 문제 정의
+
+### 기회 요소
+
+## 💡 솔루션
+### 제안 방향
+
+### 주요 기능
+
+## 📅 일정
+- **1단계**: 
+- **2단계**: 
+- **3단계**: 
+
+## 💰 예산
+
+
+## 🚨 리스크 요소
+
+
+## 📈 기대 효과
+
+""",
+            'category': 'project'
+        }
+    ]
+    
+    return jsonify({
+        'success': True,
+        'data': {
+            'user_templates': [note.to_dict() for note in user_templates],
+            'default_templates': default_templates
+        }
+    })
+
+@app.route('/api/templates/<template_id>/use', methods=['POST'])
+@jwt_required()
+@handle_errors
+def use_template(template_id):
+    """템플릿으로부터 새 노트 생성"""
+    user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    
+    # 기본 템플릿 확인
+    default_templates = {
+        'meeting-notes': {
+            'title': '회의록',
+            'emoji': '👥',
+            'content': """# 회의록\n\n## 📅 회의 정보\n- **날짜**: \n- **시간**: \n- **참석자**: \n- **장소**: \n\n## 📋 안건\n1. \n2. \n3. \n\n## 💡 주요 논의사항\n\n\n## ✅ 결정사항\n\n\n## 📝 액션 아이템\n- [ ] \n- [ ] \n- [ ] \n\n## 📌 다음 회의\n- **날짜**: \n- **안건**: """,
+            'note_type': 'meeting'
+        },
+        'daily-planning': {
+            'title': '일일 계획',
+            'emoji': '📋',
+            'content': """# 오늘의 계획\n\n## 🎯 주요 목표 (3가지)\n1. \n2. \n3. \n\n## ⏰ 시간 계획\n- **09:00 - 10:00**: \n- **10:00 - 12:00**: \n- **13:00 - 15:00**: \n- **15:00 - 17:00**: \n- **17:00 - 18:00**: \n\n## 📞 미팅/약속\n\n\n## 🧠 학습/개발\n\n\n## 💭 메모/아이디어\n\n\n## 🌟 오늘의 성과\n- \n- \n- """,
+            'note_type': 'planning'
+        },
+        'project-brief': {
+            'title': '프로젝트 기획서',
+            'emoji': '🚀',
+            'content': """# 프로젝트 기획서\n\n## 📖 프로젝트 개요\n**프로젝트명**: \n**기간**: \n**담당자**: \n\n## 🎯 목표\n### 주요 목표\n\n### 성공 지표\n\n## 📊 현황 분석\n### 문제 정의\n\n### 기회 요소\n\n## 💡 솔루션\n### 제안 방향\n\n### 주요 기능\n\n## 📅 일정\n- **1단계**: \n- **2단계**: \n- **3단계**: \n\n## 💰 예산\n\n\n## 🚨 리스크 요소\n\n\n## 📈 기대 효과""",
+            'note_type': 'project'
+        }
+    }
+    
+    template_data = None
+    
+    # 기본 템플릿 확인
+    if template_id in default_templates:
+        template_data = default_templates[template_id]
+    else:
+        # 사용자 템플릿 확인
+        template = Note.query.filter_by(
+            id=int(template_id) if template_id.isdigit() else 0,
+            user_id=user_id,
+            is_template=True
+        ).first()
+        
+        if template:
+            template_data = {
+                'title': template.title,
+                'emoji': template.emoji,
+                'content': template.content,
+                'note_type': template.note_type
+            }
+    
+    if not template_data:
+        return jsonify({
+            'success': False,
+            'message': '템플릿을 찾을 수 없습니다.'
+        }), 404
+    
+    # 새 노트 생성
+    note = Note(
+        title=data.get('title', template_data['title']),
+        content=template_data['content'],
+        emoji=template_data['emoji'],
+        note_type=template_data['note_type'],
+        user_id=user_id
+    )
+    
+    note.calculate_metrics()
+    db.session.add(note)
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'message': '템플릿으로부터 노트가 생성되었습니다.',
+        'data': note.to_dict()
+    }), 201
+
+# 에러 핸들러
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({
+        'success': False,
+        'error': 'Not Found',
+        'message': '요청한 리소스를 찾을 수 없습니다.'
+    }), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    db.session.rollback()
+    return jsonify({
+        'success': False,
+        'error': 'Internal Server Error',
+        'message': '서버 내부 오류가 발생했습니다.'
+    }), 500
+
+@app.errorhandler(400)
+def bad_request(error):
+    return jsonify({
+        'success': False,
+        'error': 'Bad Request',
+        'message': '잘못된 요청입니다.'
+    }), 400
+
+# CORS 프리플라이트 처리
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        response = jsonify({'message': 'OK'})
+        response.headers.add("Access-Control-Allow-Origin", "http://localhost:3000")
+        response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization")
+        response.headers.add('Access-Control-Allow-Methods', "GET,POST,PUT,DELETE,OPTIONS")
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response
+    
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
+    response.headers.add('Access-Control-Allow-Credentials', 'true')
+    return response
+
+# 데이터베이스 초기화
+def init_db():
+    """데이터베이스 테이블 생성"""
+    with app.app_context():
+        db.create_all()
+        logger.info("데이터베이스 테이블이 생성되었습니다.")
+
+# 샘플 데이터 생성
+def create_sample_data():
+    """개발용 샘플 데이터 생성"""
+    with app.app_context():
+        # 샘플 사용자 확인
+        user = User.query.filter_by(email='demo@cortex.app').first()
+        
+        if not user:
+            # 샘플 사용자 생성
+            user = User(
+                email='demo@cortex.app',
+                username='데모사용자',
+                password_hash=generate_password_hash('demo123'),
+                avatar_url='https://ui-avatars.com/api/?name=Demo&background=6366f1&color=fff',
+                plan='premium'
+            )
+            db.session.add(user)
+            db.session.commit()
+            
+            # 샘플 노트 생성
+            sample_notes = [
+                {
+                    'title': '프로젝트 아이디어 모음',
+                    'content': '# 새로운 프로젝트 아이디어들\n\n## 1. AI 기반 생산성 앱\n- 사용자 패턴 분석\n- 맞춤형 조언 제공\n\n## 2. 협업 도구 개선\n- 실시간 문서 편집\n- 버전 관리 시스템',
+                    'note_type': 'idea',
+                    'emoji': '💡',
+                    'category': 'work',
+                    'tags': json.dumps(['project', 'idea', 'ai'])
+                },
+                {
+                    'title': '오늘의 회의록',
+                    'content': '# 팀 미팅 회의록\n\n## 참석자\n- 김개발자\n- 이디자이너\n- 박기획자\n\n## 주요 안건\n1. Q1 로드맵 검토\n2. 신기능 우선순위 논의\n3. 버그 수정 계획',
+                    'note_type': 'meeting',
+                    'emoji': '👥',
+                    'category': 'meeting',
+                    'tags': json.dumps(['meeting', 'team', 'planning'])
+                }
+            ]
+            
+            for note_data in sample_notes:
+                note = Note(user_id=user.id, **note_data)
+                note.calculate_metrics()
+                sentiment_score, sentiment_label = AIService.analyze_sentiment(note.content)
+                note.sentiment_score = sentiment_score
+                note.sentiment_label = sentiment_label
+                db.session.add(note)
+            
+            # 샘플 작업 생성
+            sample_tasks = [
+                {
+                    'title': 'API 문서 작성 완료',
+                    'description': '새로운 엔드포인트들에 대한 상세 문서 작성',
+                    'status': 'in_progress',
+                    'priority': 'high',
+                    'progress': 75,
+                    'category': 'development',
+                    'estimated_hours': 4.0,
+                    'actual_hours': 3.0,
+                    'due_date': datetime.utcnow() + timedelta(days=2)
+                },
+                {
+                    'title': 'UI 디자인 리뷰',
+                    'description': '새로운 대시보드 UI 검토 및 피드백',
+                    'status': 'todo',
+                    'priority': 'medium',
+                    'progress': 0,
+                    'category': 'design',
+                    'estimated_hours': 2.0,
+                    'due_date': datetime.utcnow() + timedelta(days=5)
+                },
+                {
+                    'title': '데이터베이스 최적화',
+                    'description': '쿼리 성능 개선 및 인덱스 추가',
+                    'status': 'completed',
+                    'priority': 'high',
+                    'progress': 100,
+                    'category': 'development',
+                    'estimated_hours': 6.0,
+                    'actual_hours': 5.5,
+                    'completed_at': datetime.utcnow() - timedelta(days=1)
+                }
+            ]
+            
+            for task_data in sample_tasks:
+                task = Task(user_id=user.id, **task_data)
+                db.session.add(task)
+            
+            # 샘플 이벤트 생성
+            sample_events = [
+                {
+                    'title': '팀 스탠드업',
+                    'description': '일일 진행상황 공유',
+                    'start_time': datetime.utcnow().replace(hour=9, minute=0) + timedelta(days=1),
+                    'end_time': datetime.utcnow().replace(hour=9, minute=30) + timedelta(days=1),
+                    'event_type': 'meeting',
+                    'is_online': True,
+                    'meeting_url': 'https://meet.google.com/sample',
+                    'color': '#3B82F6',
+                    'category': 'work'
+                },
+                {
+                    'title': '클라이언트 미팅',
+                    'description': '프로젝트 진행상황 발표',
+                    'start_time': datetime.utcnow().replace(hour=14, minute=0) + timedelta(days=2),
+                    'end_time': datetime.utcnow().replace(hour=15, minute=30) + timedelta(days=2),
+                    'event_type': 'presentation',
+                    'location': '회의실 A',
+                    'color': '#EF4444',
+                    'category': 'client'
+                }
+            ]
+            
+            for event_data in sample_events:
+                event = Event(user_id=user.id, **event_data)
+                db.session.add(event)
+            
+            db.session.commit()
+            logger.info("샘플 데이터가 생성되었습니다.")
+            logger.info("데모 계정: demo@cortex.app / demo123")
+
+if __name__ == '__main__':
+    # 데이터베이스 초기화
+    init_db()
+    
+    # 개발 환경에서 샘플 데이터 생성
+    if os.getenv('FLASK_ENV') != 'production':
+        create_sample_data()
+    
+    # 서버 실행
+    port = int(os.getenv('PORT', 5000))
+    debug = os.getenv('FLASK_ENV') != 'production'
+    
+    logger.info(f"🚀 Cortex 백엔드 서버가 포트 {port}에서 시작됩니다...")
+    logger.info(f"📊 OpenAI API: {'✅ 연결됨' if OPENAI_API_KEY else '❌ 미설정'}")
+    logger.info(f"📝 Notion API: {'✅ 연결됨' if NOTION_TOKEN else '❌ 미설정'}")
+    logger.info(f"🐙 GitHub API: {'✅ 연결됨' if GITHUB_TOKEN else '❌ 미설정'}")
+    
+    try:
+        app.run(
+            host='0.0.0.0',
+            port=port,
+            debug=debug,
+            threaded=True
+        )
+    except Exception as e:
+        logger.error(f"❌ 앱 실행 실패: {e}")
+        import sys
+        sys.exit(1)
+        
+# GitHub API 통합
+class GitHubClient:
+    def __init__(self, token: str):
+        self.token = token
+        self.base_url = "https://api.github.com"
+        self.headers = {
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+    
+    def create_issue(self, repo: str, title: str, body: str, labels: List[str] = None):
+        """GitHub 이슈 생성"""
+        try:
+            url = f"{self.base_url}/repos/{repo}/issues"
+            data = {
+                "title": title,
+                "body": body,
+                "labels": labels or []
+            }
+            
+            response = requests.post(url, headers=self.headers, json=data)
+            response.raise_for_status()
+            return response.json()
+            
+        except Exception as e:
+            logger.error(f"GitHub 이슈 생성 실패: {e}")
+            return None
+    
+    def get_user_repos(self):
+        """사용자 리포지토리 목록 조회"""
+        try:
+            url = f"{self.base_url}/user/repos"
+            response = requests.get(url, headers=self.headers)
+            response.raise_for_status()
+            return response.json()
+            
+        except Exception as e:
+            logger.error(f"GitHub 리포지토리 조회 실패: {e}")
+            return []
+
+# 클라이언트 인스턴스
+notion_client = NotionClient(NOTION_TOKEN) if NOTION_TOKEN else None
+github_client = GitHubClient(GITHUB_TOKEN) if GITHUB_TOKEN else None
+
 
 # API 라우트
 
@@ -1238,8 +2097,8 @@ def sync_to_notion():
             'success': False,
             'message': 'Notion 통합이 설정되지 않았습니다.'
         }), 400
-    
-    # 동기화할 노트 선택
+        
+# 동기화할 노트 선택
     note_id = data.get('note_id')
     if note_id:
         note = Note.query.filter_by(id=note_id, user_id=user_id).first()
@@ -1256,834 +2115,3 @@ def sync_to_notion():
         'success': False,
         'message': '동기화할 노트를 찾을 수 없습니다.'
     }), 404
-
-@app.route('/api/integrations/github/repos', methods=['GET'])
-@jwt_required()
-@handle_errors
-def get_github_repos():
-    if not github_client:
-        return jsonify({
-            'success': False,
-            'message': 'GitHub 통합이 설정되지 않았습니다.'
-        }), 400
-    
-    repos = github_client.get_user_repos()
-    return jsonify({
-        'success': True,
-        'data': repos[:20]  # 최대 20개 리포지토리
-    })
-
-@app.route('/api/integrations/github/issue', methods=['POST'])
-@jwt_required()
-@handle_errors
-@validate_json(['repo', 'title', 'body'])
-def create_github_issue():
-    if not github_client:
-        return jsonify({
-            'success': False,
-            'message': 'GitHub 통합이 설정되지 않았습니다.'
-        }), 400
-    
-    data = request.get_json()
-    
-    result = github_client.create_issue(
-        repo=data['repo'],
-        title=data['title'],
-        body=data['body'],
-        labels=data.get('labels', [])
-    )
-    
-    if result:
-        return jsonify({
-            'success': True,
-            'message': 'GitHub 이슈가 생성되었습니다.',
-            'issue_url': result['html_url']
-        })
-    
-    return jsonify({
-        'success': False,
-        'message': 'GitHub 이슈 생성에 실패했습니다.'
-    }), 500
-
-# 검색 라우트
-@app.route('/api/search', methods=['GET'])
-@jwt_required()
-@handle_errors
-def search():
-    user_id = get_jwt_identity()
-    query = request.args.get('q', '').strip()
-    
-    if not query:
-        return jsonify({
-            'success': False,
-            'message': '검색어를 입력해주세요.'
-        }), 400
-    
-    # 노트 검색
-    notes = Note.query.filter(
-        Note.user_id == user_id,
-        Note.is_archived == False,
-        db.or_(
-            Note.title.contains(query),
-            Note.content.contains(query)
-        )
-    ).limit(10).all()
-    
-    # 작업 검색
-    tasks = Task.query.filter(
-        Task.user_id == user_id,
-        db.or_(
-            Task.title.contains(query),
-            Task.description.contains(query)
-        )
-    ).limit(10).all()
-    
-    # 이벤트 검색
-    events = Event.query.filter(
-        Event.user_id == user_id,
-        db.or_(
-            Event.title.contains(query),
-            Event.description.contains(query)
-        )
-    ).limit(10).all()
-    
-    return jsonify({
-        'success': True,
-        'data': {
-            'query': query,
-            'results': {
-                'notes': [note.to_dict() for note in notes],
-                'tasks': [task.to_dict() for task in tasks],
-                'events': [event.to_dict() for event in events]
-            },
-            'total_results': len(notes) + len(tasks) + len(events)
-        }
-    })
-
-# 통계 라우트
-@app.route('/api/analytics/productivity', methods=['GET'])
-@jwt_required()
-@handle_errors
-def get_productivity_analytics():
-    user_id = get_jwt_identity()
-    
-    # 기간 설정 (기본: 최근 30일)
-    days = request.args.get('days', 30, type=int)
-    start_date = datetime.utcnow() - timedelta(days=days)
-    
-    # 일별 통계 계산
-    daily_stats = []
-    for i in range(days):
-        date = start_date + timedelta(days=i)
-        date_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
-        date_end = date_start + timedelta(days=1)
-        
-        # 해당 날짜의 통계
-        completed_tasks = Task.query.filter(
-            Task.user_id == user_id,
-            Task.completed_at >= date_start,
-            Task.completed_at < date_end
-        ).count()
-        
-        created_notes = Note.query.filter(
-            Note.user_id == user_id,
-            Note.created_at >= date_start,
-            Note.created_at < date_end
-        ).count()
-        
-        focus_sessions = FocusSession.query.filter(
-            FocusSession.user_id == user_id,
-            FocusSession.created_at >= date_start,
-            FocusSession.created_at < date_end,
-            FocusSession.status == 'completed'
-        ).all()
-        
-        total_focus_time = sum(s.actual_duration for s in focus_sessions if s.actual_duration)
-        avg_focus_score = sum(s.focus_score for s in focus_sessions if s.focus_score) / max(1, len(focus_sessions))
-        
-        daily_stats.append({
-            'date': date.strftime('%Y-%m-%d'),
-            'completed_tasks': completed_tasks,
-            'created_notes': created_notes,
-            'focus_sessions': len(focus_sessions),
-            'total_focus_time': total_focus_time,
-            'avg_focus_score': round(avg_focus_score, 1) if focus_sessions else 0
-        })
-    
-    # 전체 통계
-    total_tasks = Task.query.filter_by(user_id=user_id).count()
-    completed_tasks = Task.query.filter_by(user_id=user_id, status='completed').count()
-    total_notes = Note.query.filter_by(user_id=user_id, is_archived=False).count()
-    
-    # 카테고리별 통계
-    task_categories = db.session.query(
-        Task.category, 
-        db.func.count(Task.id)
-    ).filter_by(user_id=user_id).group_by(Task.category).all()
-    
-    note_types = db.session.query(
-        Note.note_type,
-        db.func.count(Note.id)
-    ).filter_by(user_id=user_id, is_archived=False).group_by(Note.note_type).all()
-    
-    return jsonify({
-        'success': True,
-        'data': {
-            'daily_stats': daily_stats,
-            'summary': {
-                'total_tasks': total_tasks,
-                'completed_tasks': completed_tasks,
-                'completion_rate': (completed_tasks / max(1, total_tasks)) * 100,
-                'total_notes': total_notes,
-                'avg_productivity_score': sum(day['completed_tasks'] for day in daily_stats) / max(1, days)
-            },
-            'categories': {
-                'tasks': [{'name': cat[0] or 'Uncategorized', 'count': cat[1]} for cat in task_categories],
-                'notes': [{'name': nt[0], 'count': nt[1]} for nt in note_types]
-            }
-        }
-    })
-
-# 설정 라우트
-@app.route('/api/settings', methods=['GET'])
-@jwt_required()
-@handle_errors
-def get_settings():
-    user_id = get_jwt_identity()
-    user = User.query.get(user_id)
-    
-    return jsonify({
-        'success': True,
-        'data': {
-            'profile': {
-                'username': user.username,
-                'email': user.email,
-                'avatar_url': user.avatar_url,
-                'plan': user.plan
-            },
-            'preferences': {
-                'theme': user.theme,
-                'timezone': user.timezone,
-                'language': user.language
-            },
-            'productivity': {
-                'work_start_time': user.work_start_time,
-                'work_end_time': user.work_end_time,
-                'break_duration': user.break_duration,
-                'focus_session_duration': user.focus_session_duration
-            },
-            'ai': {
-                'coaching_enabled': user.ai_coaching_enabled,
-                'notifications_enabled': user.ai_notifications_enabled,
-                'analysis_frequency': user.ai_analysis_frequency
-            },
-            'integrations': {
-                'notion_enabled': user.notion_integration_enabled,
-                'github_enabled': user.github_integration_enabled
-            }
-        }
-    })
-
-@app.route('/api/settings', methods=['PUT'])
-@jwt_required()
-@handle_errors
-def update_settings():
-    user_id = get_jwt_identity()
-    user = User.query.get(user_id)
-    data = request.get_json()
-    
-    # 업데이트 가능한 설정들
-    settings_map = {
-        'theme': 'theme',
-        'timezone': 'timezone',
-        'language': 'language',
-        'work_start_time': 'work_start_time',
-        'work_end_time': 'work_end_time',
-        'break_duration': 'break_duration',
-        'focus_session_duration': 'focus_session_duration',
-        'ai_coaching_enabled': 'ai_coaching_enabled',
-        'ai_notifications_enabled': 'ai_notifications_enabled',
-        'ai_analysis_frequency': 'ai_analysis_frequency'
-    }
-    
-    for key, attr in settings_map.items():
-        if key in data:
-            setattr(user, attr, data[key])
-    
-    user.updated_at = datetime.utcnow()
-    db.session.commit()
-    
-    return jsonify({
-        'success': True,
-        'message': '설정이 업데이트되었습니다.'
-    })
-
-# 템플릿 라우트
-@app.route('/api/templates', methods=['GET'])
-@jwt_required()
-@handle_errors
-def get_templates():
-    """노트 템플릿 목록 조회"""
-    user_id = get_jwt_identity()
-    
-    # 사용자 커스텀 템플릿
-    user_templates = Note.query.filter_by(
-        user_id=user_id,
-        is_template=True
-    ).all()
-    
-    # 기본 템플릿들
-    default_templates = [
-        {
-            'id': 'meeting-notes',
-            'title': '회의록 템플릿',
-            'emoji': '👥',
-            'content': """# 회의록
-
-## 📅 회의 정보
-- **날짜**: 
-- **시간**: 
-- **참석자**: 
-- **장소**: 
-
-## 📋 안건
-1. 
-2. 
-3. 
-
-## 💡 주요 논의사항
-
-
-## ✅ 결정사항
-
-
-## 📝 액션 아이템
-- [ ] 
-- [ ] 
-- [ ] 
-
-## 📌 다음 회의
-- **날짜**: 
-- **안건**: 
-""",
-            'category': 'meeting'
-        },
-        {
-            'id': 'daily-planning',
-            'title': '일일 계획 템플릿',
-            'emoji': '📋',
-            'content': """# 오늘의 계획
-
-## 🎯 주요 목표 (3가지)
-1. 
-2. 
-3. 
-
-## ⏰ 시간 계획
-- **09:00 - 10:00**: 
-- **10:00 - 12:00**: 
-- **13:00 - 15:00**: 
-- **15:00 - 17:00**: 
-- **17:00 - 18:00**: 
-
-## 📞 미팅/약속
-
-
-## 🧠 학습/개발
-
-
-## 💭 메모/아이디어
-
-
-## 🌟 오늘의 성과
-- 
-- 
-- 
-""",
-            'category': 'planning'
-        },
-        {
-            'id': 'project-brief',
-            'title': '프로젝트 기획서 템플릿',
-            'emoji': '🚀',
-            'content': """# 프로젝트 기획서
-
-## 📖 프로젝트 개요
-**프로젝트명**: 
-**기간**: 
-**담당자**: 
-
-## 🎯 목표
-### 주요 목표
-
-### 성공 지표
-
-## 📊 현황 분석
-### 문제 정의
-
-### 기회 요소
-
-## 💡 솔루션
-### 제안 방향
-
-### 주요 기능
-
-## 📅 일정
-- **1단계**: 
-- **2단계**: 
-- **3단계**: 
-
-## 💰 예산
-
-
-## 🚨 리스크 요소
-
-
-## 📈 기대 효과
-
-""",
-            'category': 'project'
-        }
-    ]
-    
-    return jsonify({
-        'success': True,
-        'data': {
-            'user_templates': [note.to_dict() for note in user_templates],
-            'default_templates': default_templates
-        }
-    })
-
-@app.route('/api/templates/<template_id>/use', methods=['POST'])
-@jwt_required()
-@handle_errors
-def use_template(template_id):
-    """템플릿으로부터 새 노트 생성"""
-    user_id = get_jwt_identity()
-    data = request.get_json() or {}
-    
-    # 기본 템플릿 확인
-    default_templates = {
-        'meeting-notes': {
-            'title': '회의록',
-            'emoji': '👥',
-            'content': """# 회의록\n\n## 📅 회의 정보\n- **날짜**: \n- **시간**: \n- **참석자**: \n- **장소**: \n\n## 📋 안건\n1. \n2. \n3. \n\n## 💡 주요 논의사항\n\n\n## ✅ 결정사항\n\n\n## 📝 액션 아이템\n- [ ] \n- [ ] \n- [ ] \n\n## 📌 다음 회의\n- **날짜**: \n- **안건**: """,
-            'note_type': 'meeting'
-        }
-        # 다른 템플릿들도 여기에 추가...
-    }
-    
-    template_data = None
-    
-    # 기본 템플릿 확인
-    if template_id in default_templates:
-        template_data = default_templates[template_id]
-    else:
-        # 사용자 템플릿 확인
-        template = Note.query.filter_by(
-            id=int(template_id) if template_id.isdigit() else 0,
-            user_id=user_id,
-            is_template=True
-        ).first()
-        
-        if template:
-            template_data = {
-                'title': template.title,
-                'emoji': template.emoji,
-                'content': template.content,
-                'note_type': template.note_type
-            }
-    
-    if not template_data:
-        return jsonify({
-            'success': False,
-            'message': '템플릿을 찾을 수 없습니다.'
-        }), 404
-    
-    # 새 노트 생성
-    note = Note(
-        title=data.get('title', template_data['title']),
-        content=template_data['content'],
-        emoji=template_data['emoji'],
-        note_type=template_data['note_type'],
-        user_id=user_id
-    )
-    
-    note.calculate_metrics()
-    db.session.add(note)
-    db.session.commit()
-    
-    return jsonify({
-        'success': True,
-        'message': '템플릿으로부터 노트가 생성되었습니다.',
-        'data': note.to_dict()
-    }), 201
-
-# 에러 핸들러
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({
-        'success': False,
-        'error': 'Not Found',
-        'message': '요청한 리소스를 찾을 수 없습니다.'
-    }), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    db.session.rollback()
-    return jsonify({
-        'success': False,
-        'error': 'Internal Server Error',
-        'message': '서버 내부 오류가 발생했습니다.'
-    }), 500
-
-@app.errorhandler(400)
-def bad_request(error):
-    return jsonify({
-        'success': False,
-        'error': 'Bad Request',
-        'message': '잘못된 요청입니다.'
-    }), 400
-
-# CORS 프리플라이트 처리
-@app.before_request
-def handle_preflight():
-    if request.method == "OPTIONS":
-        response = jsonify({'message': 'OK'})
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.headers.add('Access-Control-Allow-Headers', "*")
-        response.headers.add('Access-Control-Allow-Methods', "*")
-        return response
-
-# 데이터베이스 초기화
-def init_db():
-    """데이터베이스 테이블 생성"""
-    with app.app_context():
-        db.create_all()
-        logger.info("데이터베이스 테이블이 생성되었습니다.")
-
-# 샘플 데이터 생성
-def create_sample_data():
-    """개발용 샘플 데이터 생성"""
-    with app.app_context():
-        # 샘플 사용자 확인
-        user = User.query.filter_by(email='demo@cortex.app').first()
-        
-        if not user:
-            # 샘플 사용자 생성
-            user = User(
-                email='demo@cortex.app',
-                username='데모사용자',
-                password_hash=generate_password_hash('demo123'),
-                avatar_url='https://ui-avatars.com/api/?name=Demo&background=6366f1&color=fff',
-                plan='premium'
-            )
-            db.session.add(user)
-            db.session.commit()
-            
-            # 샘플 노트 생성
-            sample_notes = [
-                {
-                    'title': '프로젝트 아이디어 모음',
-                    'content': '# 새로운 프로젝트 아이디어들\n\n## 1. AI 기반 생산성 앱\n- 사용자 패턴 분석\n- 맞춤형 조언 제공\n\n## 2. 협업 도구 개선\n- 실시간 문서 편집\n- 버전 관리 시스템',
-                    'note_type': 'idea',
-                    'emoji': '💡',
-                    'category': 'work',
-                    'tags': json.dumps(['project', 'idea', 'ai'])
-                },
-                {
-                    'title': '오늘의 회의록',
-                    'content': '# 팀 미팅 회의록\n\n## 참석자\n- 김개발자\n- 이디자이너\n- 박기획자\n\n## 주요 안건\n1. Q1 로드맵 검토\n2. 신기능 우선순위 논의\n3. 버그 수정 계획',
-                    'note_type': 'meeting',
-                    'emoji': '👥',
-                    'category': 'meeting',
-                    'tags': json.dumps(['meeting', 'team', 'planning'])
-                }
-            ]
-            
-            for note_data in sample_notes:
-                note = Note(user_id=user.id, **note_data)
-                note.calculate_metrics()
-                sentiment_score, sentiment_label = AIService.analyze_sentiment(note.content)
-                note.sentiment_score = sentiment_score
-                note.sentiment_label = sentiment_label
-                db.session.add(note)
-            
-            # 샘플 작업 생성
-            sample_tasks = [
-                {
-                    'title': 'API 문서 작성 완료',
-                    'description': '새로운 엔드포인트들에 대한 상세 문서 작성',
-                    'status': 'in_progress',
-                    'priority': 'high',
-                    'progress': 75,
-                    'category': 'development',
-                    'estimated_hours': 4.0,
-                    'actual_hours': 3.0,
-                    'due_date': datetime.utcnow() + timedelta(days=2)
-                },
-                {
-                    'title': 'UI 디자인 리뷰',
-                    'description': '새로운 대시보드 UI 검토 및 피드백',
-                    'status': 'todo',
-                    'priority': 'medium',
-                    'progress': 0,
-                    'category': 'design',
-                    'estimated_hours': 2.0,
-                    'due_date': datetime.utcnow() + timedelta(days=5)
-                },
-                {
-                    'title': '데이터베이스 최적화',
-                    'description': '쿼리 성능 개선 및 인덱스 추가',
-                    'status': 'completed',
-                    'priority': 'high',
-                    'progress': 100,
-                    'category': 'development',
-                    'estimated_hours': 6.0,
-                    'actual_hours': 5.5,
-                    'completed_at': datetime.utcnow() - timedelta(days=1)
-                }
-            ]
-            
-            for task_data in sample_tasks:
-                task = Task(user_id=user.id, **task_data)
-                db.session.add(task)
-            
-            # 샘플 이벤트 생성
-            sample_events = [
-                {
-                    'title': '팀 스탠드업',
-                    'description': '일일 진행상황 공유',
-                    'start_time': datetime.utcnow().replace(hour=9, minute=0) + timedelta(days=1),
-                    'end_time': datetime.utcnow().replace(hour=9, minute=30) + timedelta(days=1),
-                    'event_type': 'meeting',
-                    'is_online': True,
-                    'meeting_url': 'https://meet.google.com/sample',
-                    'color': '#3B82F6',
-                    'category': 'work'
-                },
-                {
-                    'title': '클라이언트 미팅',
-                    'description': '프로젝트 진행상황 발표',
-                    'start_time': datetime.utcnow().replace(hour=14, minute=0) + timedelta(days=2),
-                    'end_time': datetime.utcnow().replace(hour=15, minute=30) + timedelta(days=2),
-                    'event_type': 'presentation',
-                    'location': '회의실 A',
-                    'color': '#EF4444',
-                    'category': 'client'
-                }
-            ]
-            
-            for event_data in sample_events:
-                event = Event(user_id=user.id, **event_data)
-                db.session.add(event)
-            
-            db.session.commit()
-            logger.info("샘플 데이터가 생성되었습니다.")
-            logger.info("데모 계정: demo@cortex.app / demo123")
-
-if __name__ == '__main__':
-    # 데이터베이스 초기화
-    init_db()
-    
-    # 개발 환경에서 샘플 데이터 생성
-    if os.getenv('FLASK_ENV') != 'production':
-        create_sample_data()
-    
-    # 서버 실행
-    port = int(os.getenv('PORT', 5000))
-    debug = os.getenv('FLASK_ENV') != 'production'
-    
-    logger.info(f"🚀 Cortex 백엔드 서버가 포트 {port}에서 시작됩니다...")
-    logger.info(f"📊 OpenAI API: {'✅ 연결됨' if OPENAI_API_KEY else '❌ 미설정'}")
-    logger.info(f"📝 Notion API: {'✅ 연결됨' if NOTION_TOKEN else '❌ 미설정'}")
-    logger.info(f"🐙 GitHub API: {'✅ 연결됨' if GITHUB_TOKEN else '❌ 미설정'}")
-    
-    app.run(
-        host='0.0.0.0',
-        port=port,
-        debug=debug,
-        threaded=True
-    )
-                (f"Notion 페이지 생성 실패: {e}")
-            return None
-    
-    def sync_note_to_notion(self, note: Note):
-        """노트를 Notion으로 동기화"""
-        try:
-            properties = {
-                "Name": {
-                    "title": [{"text": {"content": note.title}}]
-                },
-                "Tags": {
-                    "multi_select": [
-                        {"name": tag} for tag in (json.loads(note.tags) if note.tags else [])
-                    ]
-                },
-                "Type": {
-                    "select": {"name": note.note_type}
-                },
-                "Status": {
-                    "select": {"name": "Draft" if not note.is_public else "Published"}
-                },
-                "Created": {
-                    "date": {"start": note.created_at.isoformat()}
-                }
-            }
-            
-            result = self.create_page(NOTION_DB_ID, properties, note.content)
-            if result:
-                note.notion_page_id = result['id']
-                db.session.commit()
-                return result
-                
-        except Exception as e:
-            logger.error(f"Notion 동기화 실패: {e}")
-            return None
-
-# GitHub API 통합
-class GitHubClient:
-    def __init__(self, token: str):
-        self.token = token
-        self.base_url = "https://api.github.com"
-        self.headers = {
-            "Authorization": f"token {token}",
-            "Accept": "application/vnd.github.v3+json"
-        }
-    
-    def create_issue(self, repo: str, title: str, body: str, labels: List[str] = None):
-        """GitHub 이슈 생성"""
-        try:
-            url = f"{self.base_url}/repos/{repo}/issues"
-            data = {
-                "title": title,
-                "body": body,
-                "labels": labels or []
-            }
-            
-            response = requests.post(url, headers=self.headers, json=data)
-            response.raise_for_status()
-            return response.json()
-            
-        except Exception as e:
-            logger.error(f"GitHub 이슈 생성 실패: {e}")
-            return None
-    
-    def get_user_repos(self):
-        """사용자 리포지토리 목록 조회"""
-        try:
-            url = f"{self.base_url}/user/repos"
-            response = requests.get(url, headers=self.headers)
-            response.raise_for_status()
-            return response.json()
-            
-        except Exception as e:
-            logger.error(f"GitHub 리포지토리 조회 실패: {e}")
-            return []
-
-# AI 서비스
-class AIService:
-    @staticmethod
-    def generate_daily_insights(user_id: int) -> dict:
-        """일일 AI 인사이트 생성"""
-        try:
-            user = User.query.get(user_id)
-            if not user or not user.ai_coaching_enabled:
-                return None
-            
-            # 최근 7일 데이터 수집
-            week_ago = datetime.utcnow() - timedelta(days=7)
-            
-            recent_tasks = Task.query.filter(
-                Task.user_id == user_id,
-                Task.updated_at >= week_ago
-            ).all()
-            
-            recent_notes = Note.query.filter(
-                Note.user_id == user_id,
-                Note.updated_at >= week_ago
-            ).all()
-            
-            focus_sessions = FocusSession.query.filter(
-                FocusSession.user_id == user_id,
-                FocusSession.created_at >= week_ago
-            ).all()
-            
-            # 통계 계산
-            completed_tasks = [t for t in recent_tasks if t.status == 'completed']
-            completion_rate = (len(completed_tasks) / max(1, len(recent_tasks))) * 100
-            
-            total_focus_time = sum(s.actual_duration for s in focus_sessions if s.actual_duration)
-            avg_focus_score = sum(s.focus_score for s in focus_sessions if s.focus_score) / max(1, len(focus_sessions))
-            
-            # OpenAI로 개인화된 분석 생성
-            prompt = f"""
-당신은 전문 생산성 코치입니다. 다음 사용자 데이터를 분석하여 한국어로 인사이트를 제공해주세요:
-
-사용자 정보:
-- 이름: {user.username}
-- 계획: {user.plan}
-- 근무시간: {user.work_start_time} - {user.work_end_time}
-
-최근 7일 데이터:
-- 총 작업: {len(recent_tasks)}개
-- 완료된 작업: {len(completed_tasks)}개
-- 완료율: {completion_rate:.1f}%
-- 작성한 노트: {len(recent_notes)}개
-- 집중 세션: {len(focus_sessions)}개
-- 총 집중 시간: {total_focus_time}분
-- 평균 집중도: {avg_focus_score:.1f}/10
-
-다음 JSON 형식으로 응답해주세요:
-{{
-    "daily_summary": "오늘의 생산성 요약 (친근한 톤, 2-3문장)",
-    "focus_score": 집중도점수(1-10),
-    "productivity_trend": "상승/하락/유지",
-    "suggestions": [
-        "구체적인 개선 제안 1",
-        "구체적인 개선 제안 2", 
-        "구체적인 개선 제안 3"
-    ],
-    "achievements": [
-        "이번 주 성과 1",
-        "이번 주 성과 2"
-    ],
-    "next_actions": [
-        "다음에 할 일 추천 1",
-        "다음에 할 일 추천 2"
-    ],
-    "motivation_message": "격려 메시지"
-}}
-"""
-            
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=800,
-                temperature=0.7
-            )
-            
-            ai_content = json.loads(response.choices[0].message.content)
-            
-            # 인사이트 저장
-            insight = AIInsight(
-                user_id=user_id,
-                insight_type='daily_summary',
-                title=f"{user.username}님의 일일 생산성 리포트",
-                content=json.dumps(ai_content, ensure_ascii=False),
-                confidence_score=0.85,
-                metadata=json.dumps({
-                    'completion_rate': completion_rate,
-                    'focus_time': total_focus_time,
-                    'tasks_count': len(recent_tasks),
-                    'notes_count': len(recent_notes)
-                }, ensure_ascii=False)
-            )
-            
-            db.session.add(insight)
-            db.session.commit()
-            
-            return ai_content
-            
-        except Exception as e:
-            logger.error

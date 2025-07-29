@@ -1,57 +1,138 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { 
-  Calendar, Edit, TrendingUp, Heart, Brain, Target, Clock, CheckCircle, AlertCircle, 
-  MessageCircle, PlusCircle, ArrowRight, BarChart3, Smile, Frown, Meh, User,
-  Search, Settings, Bell, Moon, Sun, Menu, X, Filter, SortAsc, Archive,
-  Share2, Download, Upload, Trash2, MoreHorizontal, Zap, Sparkles, Command,
-  ChevronDown, ChevronRight, Tag, Bookmark, Link2, Image, Code, Table,
-  Layout, List, Grid, MapPin, Globe, Lock, Eye, EyeOff, Copy, Check,
-  RefreshCw, Play, Pause, Square, Volume2, VolumeX, Headphones, Save,
-  FileText, FolderOpen, Star, Hash, Clipboard, Send, Mic, MicOff
-} from 'lucide-react';
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
+import {
+  Calendar,
+  Edit,
+  TrendingUp,
+  Heart,
+  Brain,
+  Target,
+  Clock,
+  CheckCircle,
+  AlertCircle,
+  MessageCircle,
+  PlusCircle,
+  ArrowRight,
+  BarChart3,
+  Smile,
+  Frown,
+  Meh,
+  User,
+  Search,
+  Settings,
+  Bell,
+  Moon,
+  Sun,
+  Menu,
+  X,
+  Filter,
+  SortAsc,
+  Archive,
+  Share2,
+  Download,
+  Upload,
+  Trash2,
+  MoreHorizontal,
+  Zap,
+  Sparkles,
+  Command,
+  ChevronDown,
+  ChevronRight,
+  Tag,
+  Bookmark,
+  Link2,
+  Image,
+  Code,
+  Table,
+  Layout,
+  List,
+  Grid,
+  MapPin,
+  Globe,
+  Lock,
+  Eye,
+  EyeOff,
+  Copy,
+  Check,
+  RefreshCw,
+  Play,
+  Pause,
+  Square,
+  Volume2,
+  VolumeX,
+  Headphones,
+  Save,
+  FileText,
+  FolderOpen,
+  Star,
+  Hash,
+  Clipboard,
+  Send,
+  Mic,
+  MicOff,
+} from "lucide-react";
+// src/App.js
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Navigate,
+} from "react-router-dom";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
+
+// 컴포넌트 임포트
+import Login from "./components/Login";
+import Register from "./components/Register";
+import Dashboard from "./components/Dashboard";
+import LoadingSpinner from "./components/LoadingSpinner";
 
 // API 설정
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = "http://localhost:5000/api";
 
 // API 클라이언트 클래스
 class CortexAPI {
   constructor() {
-    this.token = localStorage.getItem('cortex_token');
+    this.token = localStorage.getItem("cortex_token");
   }
 
   setToken(token) {
     this.token = token;
-    localStorage.setItem('cortex_token', token);
+    localStorage.setItem("cortex_token", token);
   }
 
   removeToken() {
     this.token = null;
-    localStorage.removeItem('cortex_token');
+    localStorage.removeItem("cortex_token");
   }
 
   async request(endpoint, options = {}) {
     const url = `${API_BASE_URL}${endpoint}`;
     const config = {
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         ...(this.token && { Authorization: `Bearer ${this.token}` }),
         ...options.headers,
       },
       ...options,
     };
 
-    if (config.body && typeof config.body === 'object') {
+    if (config.body && typeof config.body === "object") {
       config.body = JSON.stringify(config.body);
     }
 
     try {
       const response = await fetch(url, config);
       const data = await response.json();
-      
+
       if (!response.ok) {
-        throw new Error(data.message || 'API 요청 실패');
+        throw new Error(data.message || "API 요청 실패");
       }
-      
+
       return data;
     } catch (error) {
       console.error(`API Error (${endpoint}):`, error);
@@ -61,9 +142,9 @@ class CortexAPI {
 
   // 인증
   async login(email, password) {
-    const result = await this.request('/auth/login', {
-      method: 'POST',
-      body: { email, password }
+    const result = await this.request("/auth/login", {
+      method: "POST",
+      body: { email, password },
     });
     if (result.access_token) {
       this.setToken(result.access_token);
@@ -72,9 +153,9 @@ class CortexAPI {
   }
 
   async register(email, username, password) {
-    const result = await this.request('/auth/register', {
-      method: 'POST',
-      body: { email, username, password }
+    const result = await this.request("/auth/register", {
+      method: "POST",
+      body: { email, username, password },
     });
     if (result.access_token) {
       this.setToken(result.access_token);
@@ -83,12 +164,12 @@ class CortexAPI {
   }
 
   async getCurrentUser() {
-    return this.request('/auth/me');
+    return this.request("/auth/me");
   }
 
   // 대시보드
   async getDashboardSummary() {
-    return this.request('/dashboard/summary');
+    return this.request("/dashboard/summary");
   }
 
   // 노트
@@ -98,41 +179,41 @@ class CortexAPI {
   }
 
   async createNote(noteData) {
-    return this.request('/notes', {
-      method: 'POST',
-      body: noteData
+    return this.request("/notes", {
+      method: "POST",
+      body: noteData,
     });
   }
 
   async updateNote(noteId, noteData) {
     return this.request(`/notes/${noteId}`, {
-      method: 'PUT',
-      body: noteData
+      method: "PUT",
+      body: noteData,
     });
   }
 
   async deleteNote(noteId) {
     return this.request(`/notes/${noteId}`, {
-      method: 'DELETE'
+      method: "DELETE",
     });
   }
 
   // 작업
   async getTasks() {
-    return this.request('/tasks');
+    return this.request("/tasks");
   }
 
   async createTask(taskData) {
-    return this.request('/tasks', {
-      method: 'POST',
-      body: taskData
+    return this.request("/tasks", {
+      method: "POST",
+      body: taskData,
     });
   }
 
   async updateTask(taskId, taskData) {
     return this.request(`/tasks/${taskId}`, {
-      method: 'PUT',
-      body: taskData
+      method: "PUT",
+      body: taskData,
     });
   }
 
@@ -143,36 +224,36 @@ class CortexAPI {
   }
 
   async createEvent(eventData) {
-    return this.request('/events', {
-      method: 'POST',
-      body: eventData
+    return this.request("/events", {
+      method: "POST",
+      body: eventData,
     });
   }
 
   // AI 기능
   async getAIInsights() {
-    return this.request('/ai/insights');
+    return this.request("/ai/insights");
   }
 
   async chatWithAI(message) {
-    return this.request('/ai/chat', {
-      method: 'POST',
-      body: { message }
+    return this.request("/ai/chat", {
+      method: "POST",
+      body: { message },
     });
   }
 
   // 포커스 세션
   async startFocusSession(sessionData) {
-    return this.request('/focus/sessions', {
-      method: 'POST',
-      body: sessionData
+    return this.request("/focus/sessions", {
+      method: "POST",
+      body: sessionData,
     });
   }
 
   async completeFocusSession(sessionId, data) {
     return this.request(`/focus/sessions/${sessionId}/complete`, {
-      method: 'POST',
-      body: data
+      method: "POST",
+      body: data,
     });
   }
 
@@ -188,44 +269,44 @@ class CortexAPI {
 
   // 설정
   async getSettings() {
-    return this.request('/settings');
+    return this.request("/settings");
   }
 
   async updateSettings(settings) {
-    return this.request('/settings', {
-      method: 'PUT',
-      body: settings
+    return this.request("/settings", {
+      method: "PUT",
+      body: settings,
     });
   }
 
   // 템플릿
   async getTemplates() {
-    return this.request('/templates');
+    return this.request("/templates");
   }
 
   async useTemplate(templateId, data = {}) {
     return this.request(`/templates/${templateId}/use`, {
-      method: 'POST',
-      body: data
+      method: "POST",
+      body: data,
     });
   }
 
   // 외부 통합
   async syncToNotion(noteId) {
-    return this.request('/integrations/notion/sync', {
-      method: 'POST',
-      body: { note_id: noteId }
+    return this.request("/integrations/notion/sync", {
+      method: "POST",
+      body: { note_id: noteId },
     });
   }
 
   async getGitHubRepos() {
-    return this.request('/integrations/github/repos');
+    return this.request("/integrations/github/repos");
   }
 
   async createGitHubIssue(repo, title, body, labels = []) {
-    return this.request('/integrations/github/issue', {
-      method: 'POST',
-      body: { repo, title, body, labels }
+    return this.request("/integrations/github/issue", {
+      method: "POST",
+      body: { repo, title, body, labels },
     });
   }
 }
@@ -239,9 +320,11 @@ const CortexApp = () => {
   const [user, setUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [theme, setTheme] = useState(localStorage.getItem('cortex_theme') || 'light');
+  const [theme, setTheme] = useState(
+    localStorage.getItem("cortex_theme") || "light"
+  );
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [activeView, setActiveView] = useState('dashboard');
+  const [activeView, setActiveView] = useState("dashboard");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 
   // 데이터 상태
@@ -254,7 +337,7 @@ const CortexApp = () => {
 
   // UI 상태
   const [notifications, setNotifications] = useState([]);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState(null);
 
   // 포커스 세션 상태
@@ -265,7 +348,7 @@ const CortexApp = () => {
   // AI 채팅 상태
   const [aiChatOpen, setAiChatOpen] = useState(false);
   const [aiChatMessages, setAiChatMessages] = useState([]);
-  const [aiChatInput, setAiChatInput] = useState('');
+  const [aiChatInput, setAiChatInput] = useState("");
 
   // Refs
   const timerRef = useRef(null);
@@ -277,32 +360,32 @@ const CortexApp = () => {
 
   // 테마 적용
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-    localStorage.setItem('cortex_theme', theme);
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    localStorage.setItem("cortex_theme", theme);
   }, [theme]);
 
   // 키보드 단축키
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
         setCommandPaletteOpen(true);
       }
-      if (e.key === 'Escape') {
+      if (e.key === "Escape") {
         setCommandPaletteOpen(false);
         setAiChatOpen(false);
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   // 포커스 타이머
   useEffect(() => {
     if (isTimerRunning && focusSession) {
       timerRef.current = setInterval(() => {
-        setFocusTimer(prev => prev + 1);
+        setFocusTimer((prev) => prev + 1);
       }, 1000);
     } else {
       clearInterval(timerRef.current);
@@ -325,7 +408,7 @@ const CortexApp = () => {
         }
       }
     } catch (error) {
-      console.error('초기화 실패:', error);
+      console.error("초기화 실패:", error);
       api.removeToken();
     } finally {
       setLoading(false);
@@ -337,7 +420,7 @@ const CortexApp = () => {
     try {
       const [dashboardResult, aiResult] = await Promise.all([
         api.getDashboardSummary(),
-        api.getAIInsights()
+        api.getAIInsights(),
       ]);
 
       if (dashboardResult.success) {
@@ -350,24 +433,24 @@ const CortexApp = () => {
         setAIInsights(aiResult.data);
       }
     } catch (error) {
-      console.error('대시보드 로드 실패:', error);
-      showNotification('데이터를 불러오는데 실패했습니다.', 'error');
+      console.error("대시보드 로드 실패:", error);
+      showNotification("데이터를 불러오는데 실패했습니다.", "error");
     }
   };
 
   // 알림 표시
-  const showNotification = (message, type = 'info') => {
+  const showNotification = (message, type = "info") => {
     const notification = {
       id: Date.now(),
       message,
       type,
-      timestamp: new Date()
+      timestamp: new Date(),
     };
-    setNotifications(prev => [notification, ...prev].slice(0, 10));
+    setNotifications((prev) => [notification, ...prev].slice(0, 10));
 
     // 3초 후 자동 제거
     setTimeout(() => {
-      setNotifications(prev => prev.filter(n => n.id !== notification.id));
+      setNotifications((prev) => prev.filter((n) => n.id !== notification.id));
     }, 3000);
   };
 
@@ -379,12 +462,12 @@ const CortexApp = () => {
         setUser(result.user);
         setIsAuthenticated(true);
         await loadDashboardData();
-        showNotification('로그인되었습니다!', 'success');
+        showNotification("로그인되었습니다!", "success");
       } else {
-        showNotification(result.message, 'error');
+        showNotification(result.message, "error");
       }
     } catch (error) {
-      showNotification('로그인에 실패했습니다.', 'error');
+      showNotification("로그인에 실패했습니다.", "error");
     }
   };
 
@@ -397,12 +480,12 @@ const CortexApp = () => {
     setTasks([]);
     setEvents([]);
     setDashboardData(null);
-    showNotification('로그아웃되었습니다.', 'info');
+    showNotification("로그아웃되었습니다.", "info");
   };
 
   // 테마 토글
   const toggleTheme = useCallback(() => {
-    setTheme(prev => prev === 'light' ? 'dark' : 'light');
+    setTheme((prev) => (prev === "light" ? "dark" : "light"));
   }, []);
 
   // 검색
@@ -418,7 +501,7 @@ const CortexApp = () => {
         setSearchResults(result.data);
       }
     } catch (error) {
-      console.error('검색 실패:', error);
+      console.error("검색 실패:", error);
     }
   };
 
@@ -427,12 +510,12 @@ const CortexApp = () => {
     try {
       const result = await api.createNote(noteData);
       if (result.success) {
-        setNotes(prev => [result.data, ...prev]);
-        showNotification('노트가 생성되었습니다!', 'success');
+        setNotes((prev) => [result.data, ...prev]);
+        showNotification("노트가 생성되었습니다!", "success");
         return result.data;
       }
     } catch (error) {
-      showNotification('노트 생성에 실패했습니다.', 'error');
+      showNotification("노트 생성에 실패했습니다.", "error");
     }
   };
 
@@ -441,12 +524,12 @@ const CortexApp = () => {
     try {
       const result = await api.createTask(taskData);
       if (result.success) {
-        setTasks(prev => [result.data, ...prev]);
-        showNotification('작업이 생성되었습니다!', 'success');
+        setTasks((prev) => [result.data, ...prev]);
+        showNotification("작업이 생성되었습니다!", "success");
         return result.data;
       }
     } catch (error) {
-      showNotification('작업 생성에 실패했습니다.', 'error');
+      showNotification("작업 생성에 실패했습니다.", "error");
     }
   };
 
@@ -455,32 +538,42 @@ const CortexApp = () => {
     try {
       const result = await api.updateTask(taskId, { status });
       if (result.success) {
-        setTasks(prev => prev.map(task => 
-          task.id === taskId ? { ...task, status, updated_at: new Date().toISOString() } : task
-        ));
-        showNotification(`작업이 ${status === 'completed' ? '완료' : '업데이트'}되었습니다!`, 'success');
+        setTasks((prev) =>
+          prev.map((task) =>
+            task.id === taskId
+              ? { ...task, status, updated_at: new Date().toISOString() }
+              : task
+          )
+        );
+        showNotification(
+          `작업이 ${status === "completed" ? "완료" : "업데이트"}되었습니다!`,
+          "success"
+        );
       }
     } catch (error) {
-      showNotification('작업 업데이트에 실패했습니다.', 'error');
+      showNotification("작업 업데이트에 실패했습니다.", "error");
     }
   };
 
   // 포커스 세션 시작
-  const startFocusSession = async (type = 'pomodoro', duration = 25) => {
+  const startFocusSession = async (type = "pomodoro", duration = 25) => {
     try {
       const result = await api.startFocusSession({
         session_type: type,
-        planned_duration: duration
+        planned_duration: duration,
       });
-      
+
       if (result.success) {
         setFocusSession(result.data);
         setFocusTimer(0);
         setIsTimerRunning(true);
-        showNotification(`${duration}분 집중 세션이 시작되었습니다!`, 'success');
+        showNotification(
+          `${duration}분 집중 세션이 시작되었습니다!`,
+          "success"
+        );
       }
     } catch (error) {
-      showNotification('집중 세션 시작에 실패했습니다.', 'error');
+      showNotification("집중 세션 시작에 실패했습니다.", "error");
     }
   };
 
@@ -491,17 +584,20 @@ const CortexApp = () => {
     try {
       const result = await api.completeFocusSession(focusSession.id, {
         quality_rating: rating,
-        focus_score: Math.min(10, (focusTimer / 60) / focusSession.planned_duration * 10)
+        focus_score: Math.min(
+          10,
+          (focusTimer / 60 / focusSession.planned_duration) * 10
+        ),
       });
 
       if (result.success) {
         setFocusSession(null);
         setFocusTimer(0);
         setIsTimerRunning(false);
-        showNotification('집중 세션이 완료되었습니다!', 'success');
+        showNotification("집중 세션이 완료되었습니다!", "success");
       }
     } catch (error) {
-      showNotification('세션 완료 처리에 실패했습니다.', 'error');
+      showNotification("세션 완료 처리에 실패했습니다.", "error");
     }
   };
 
@@ -509,27 +605,31 @@ const CortexApp = () => {
   const sendAIMessage = async (message) => {
     if (!message.trim()) return;
 
-    const userMessage = { role: 'user', content: message, timestamp: new Date() };
-    setAiChatMessages(prev => [...prev, userMessage]);
-    setAiChatInput('');
+    const userMessage = {
+      role: "user",
+      content: message,
+      timestamp: new Date(),
+    };
+    setAiChatMessages((prev) => [...prev, userMessage]);
+    setAiChatInput("");
 
     try {
       const result = await api.chatWithAI(message);
       if (result.success) {
-        const aiMessage = { 
-          role: 'assistant', 
-          content: result.data.response, 
-          timestamp: new Date() 
+        const aiMessage = {
+          role: "assistant",
+          content: result.data.response,
+          timestamp: new Date(),
         };
-        setAiChatMessages(prev => [...prev, aiMessage]);
+        setAiChatMessages((prev) => [...prev, aiMessage]);
       }
     } catch (error) {
       const errorMessage = {
-        role: 'assistant',
-        content: '죄송합니다. 현재 AI 서비스에 문제가 있습니다.',
-        timestamp: new Date()
+        role: "assistant",
+        content: "죄송합니다. 현재 AI 서비스에 문제가 있습니다.",
+        timestamp: new Date(),
       };
-      setAiChatMessages(prev => [...prev, errorMessage]);
+      setAiChatMessages((prev) => [...prev, errorMessage]);
     }
   };
 
@@ -537,7 +637,9 @@ const CortexApp = () => {
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    return `${mins.toString().padStart(2, "0")}:${secs
+      .toString()
+      .padStart(2, "0")}`;
   };
 
   // 로딩 화면
@@ -548,8 +650,12 @@ const CortexApp = () => {
           <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-blue-600 rounded-xl flex items-center justify-center mb-4 mx-auto animate-pulse">
             <Zap className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Cortex</h1>
-          <p className="text-gray-600 dark:text-gray-400">생산성 앱을 불러오는 중...</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+            Cortex
+          </h1>
+          <p className="text-gray-600 dark:text-gray-400">
+            생산성 앱을 불러오는 중...
+          </p>
         </div>
       </div>
     );
@@ -564,7 +670,7 @@ const CortexApp = () => {
   return (
     <div className={`min-h-screen bg-gray-50 dark:bg-gray-900 ${theme}`}>
       {/* 사이드바 */}
-      <Sidebar 
+      <Sidebar
         isOpen={sidebarOpen}
         activeView={activeView}
         onViewChange={setActiveView}
@@ -576,9 +682,13 @@ const CortexApp = () => {
       />
 
       {/* 메인 콘텐츠 */}
-      <div className={`transition-all duration-300 ${sidebarOpen ? 'ml-64' : 'ml-16'}`}>
+      <div
+        className={`transition-all duration-300 ${
+          sidebarOpen ? "ml-64" : "ml-16"
+        }`}
+      >
         {/* 헤더 */}
-        <Header 
+        <Header
           user={user}
           theme={theme}
           sidebarOpen={sidebarOpen}
@@ -592,8 +702,8 @@ const CortexApp = () => {
 
         {/* 콘텐츠 영역 */}
         <main className="p-6">
-          {activeView === 'dashboard' && (
-            <Dashboard 
+          {activeView === "dashboard" && (
+            <Dashboard
               data={dashboardData}
               notes={notes}
               tasks={tasks}
@@ -604,31 +714,31 @@ const CortexApp = () => {
               onUpdateTask={updateTaskStatus}
             />
           )}
-          
-          {activeView === 'notes' && (
-            <NotesView 
+
+          {activeView === "notes" && (
+            <NotesView
               notes={notes}
               onCreateNote={createNote}
               onSyncToNotion={(noteId) => api.syncToNotion(noteId)}
             />
           )}
-          
-          {activeView === 'tasks' && (
-            <TasksView 
+
+          {activeView === "tasks" && (
+            <TasksView
               tasks={tasks}
               onCreateTask={createTask}
               onUpdateTask={updateTaskStatus}
             />
           )}
-          
-          {activeView === 'calendar' && (
-            <CalendarView 
+
+          {activeView === "calendar" && (
+            <CalendarView
               events={events}
               onCreateEvent={(eventData) => api.createEvent(eventData)}
             />
           )}
-          
-          {activeView === 'analytics' && (
+
+          {activeView === "analytics" && (
             <AnalyticsView analytics={analytics} />
           )}
         </main>
@@ -639,7 +749,7 @@ const CortexApp = () => {
 
       {/* 커맨드 팔레트 */}
       {commandPaletteOpen && (
-        <CommandPalette 
+        <CommandPalette
           isOpen={commandPaletteOpen}
           onClose={() => setCommandPaletteOpen(false)}
           onSearch={handleSearch}
@@ -652,7 +762,7 @@ const CortexApp = () => {
 
       {/* AI 채팅 */}
       {aiChatOpen && (
-        <AIChatPanel 
+        <AIChatPanel
           isOpen={aiChatOpen}
           onClose={() => setAiChatOpen(false)}
           messages={aiChatMessages}
@@ -664,7 +774,7 @@ const CortexApp = () => {
 
       {/* 포커스 세션 타이머 */}
       {focusSession && (
-        <FocusTimer 
+        <FocusTimer
           session={focusSession}
           timer={focusTimer}
           isRunning={isTimerRunning}
@@ -680,16 +790,16 @@ const CortexApp = () => {
 // 로그인 화면 컴포넌트
 const LoginScreen = ({ onLogin, api }) => {
   const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState('demo@cortex.app');
-  const [password, setPassword] = useState('demo123');
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState("demo@cortex.app");
+  const [password, setPassword] = useState("demo123");
+  const [username, setUsername] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setError('');
+    setError("");
 
     try {
       if (isLogin) {
@@ -716,9 +826,11 @@ const LoginScreen = ({ onLogin, api }) => {
           <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-blue-600 rounded-xl flex items-center justify-center mx-auto mb-4">
             <Zap className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Cortex</h1>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+            Cortex
+          </h1>
           <p className="text-gray-600 dark:text-gray-400 mt-2">
-            {isLogin ? '로그인하여 시작하세요' : '새 계정을 만드세요'}
+            {isLogin ? "로그인하여 시작하세요" : "새 계정을 만드세요"}
           </p>
         </div>
 
@@ -775,7 +887,7 @@ const LoginScreen = ({ onLogin, api }) => {
             disabled={loading}
             className="w-full bg-gradient-to-r from-purple-500 to-blue-600 text-white rounded-lg py-2 px-4 font-medium hover:from-purple-600 hover:to-blue-700 transition-colors disabled:opacity-50"
           >
-            {loading ? '처리 중...' : (isLogin ? '로그인' : '회원가입')}
+            {loading ? "처리 중..." : isLogin ? "로그인" : "회원가입"}
           </button>
         </form>
 
@@ -784,7 +896,7 @@ const LoginScreen = ({ onLogin, api }) => {
             onClick={() => setIsLogin(!isLogin)}
             className="text-purple-600 hover:text-purple-700 text-sm font-medium"
           >
-            {isLogin ? '새 계정 만들기' : '이미 계정이 있으신가요? 로그인'}
+            {isLogin ? "새 계정 만들기" : "이미 계정이 있으신가요? 로그인"}
           </button>
         </div>
 
@@ -799,20 +911,31 @@ const LoginScreen = ({ onLogin, api }) => {
 };
 
 // 사이드바 컴포넌트
-const Sidebar = ({ isOpen, activeView, onViewChange, user, aiInsights, focusSession, focusTimer, onStartFocus }) => {
+const Sidebar = ({
+  isOpen,
+  activeView,
+  onViewChange,
+  user,
+  aiInsights,
+  focusSession,
+  focusTimer,
+  onStartFocus,
+}) => {
   const menuItems = [
-    { id: 'dashboard', label: '대시보드', icon: Layout },
-    { id: 'notes', label: '노트', icon: Edit },
-    { id: 'tasks', label: '작업', icon: CheckCircle },
-    { id: 'calendar', label: '캘린더', icon: Calendar },
-    { id: 'analytics', label: '분석', icon: BarChart3 },
-    { id: 'settings', label: '설정', icon: Settings }
+    { id: "dashboard", label: "대시보드", icon: Layout },
+    { id: "notes", label: "노트", icon: Edit },
+    { id: "tasks", label: "작업", icon: CheckCircle },
+    { id: "calendar", label: "캘린더", icon: Calendar },
+    { id: "analytics", label: "분석", icon: BarChart3 },
+    { id: "settings", label: "설정", icon: Settings },
   ];
 
   return (
-    <div className={`fixed left-0 top-0 h-full bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 transition-all duration-300 z-40 ${
-      isOpen ? 'w-64' : 'w-16'
-    }`}>
+    <div
+      className={`fixed left-0 top-0 h-full bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 transition-all duration-300 z-40 ${
+        isOpen ? "w-64" : "w-16"
+      }`}
+    >
       <div className="p-4 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-blue-600 rounded-lg flex items-center justify-center">
@@ -820,8 +943,12 @@ const Sidebar = ({ isOpen, activeView, onViewChange, user, aiInsights, focusSess
           </div>
           {isOpen && (
             <div>
-              <h1 className="font-bold text-gray-900 dark:text-white">Cortex</h1>
-              <p className="text-xs text-gray-500">v2.0 {user?.plan || 'Free'}</p>
+              <h1 className="font-bold text-gray-900 dark:text-white">
+                Cortex
+              </h1>
+              <p className="text-xs text-gray-500">
+                v2.0 {user?.plan || "Free"}
+              </p>
             </div>
           )}
         </div>
@@ -834,8 +961,8 @@ const Sidebar = ({ isOpen, activeView, onViewChange, user, aiInsights, focusSess
             onClick={() => onViewChange(item.id)}
             className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
               activeView === item.id
-                ? 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300'
-                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                ? "bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300"
+                : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
             }`}
             title={!isOpen ? item.label : undefined}
           >
@@ -852,10 +979,13 @@ const Sidebar = ({ isOpen, activeView, onViewChange, user, aiInsights, focusSess
             <div className="bg-green-50 dark:bg-green-900 rounded-lg p-4 border border-green-200 dark:border-green-700">
               <div className="flex items-center gap-2 mb-2">
                 <Play className="w-4 h-4 text-green-600" />
-                <span className="font-medium text-green-800 dark:text-green-200">집중 세션 진행 중</span>
+                <span className="font-medium text-green-800 dark:text-green-200">
+                  집중 세션 진행 중
+                </span>
               </div>
               <div className="text-2xl font-bold text-green-700 dark:text-green-300">
-                {Math.floor(focusTimer / 60)}:{(focusTimer % 60).toString().padStart(2, '0')}
+                {Math.floor(focusTimer / 60)}:
+                {(focusTimer % 60).toString().padStart(2, "0")}
               </div>
               <div className="text-sm text-green-600 dark:text-green-400">
                 목표: {focusSession.planned_duration}분
@@ -863,7 +993,7 @@ const Sidebar = ({ isOpen, activeView, onViewChange, user, aiInsights, focusSess
             </div>
           ) : (
             <button
-              onClick={() => onStartFocus('pomodoro', 25)}
+              onClick={() => onStartFocus("pomodoro", 25)}
               className="w-full bg-gradient-to-r from-green-500 to-blue-600 text-white rounded-lg p-4 hover:from-green-600 hover:to-blue-700 transition-colors"
             >
               <div className="flex items-center gap-2 mb-2">
@@ -879,7 +1009,9 @@ const Sidebar = ({ isOpen, activeView, onViewChange, user, aiInsights, focusSess
             <div className="bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900 dark:to-blue-900 rounded-lg p-4 border border-purple-200 dark:border-purple-700">
               <div className="flex items-center gap-2 mb-2">
                 <Sparkles className="w-4 h-4 text-purple-600" />
-                <span className="font-medium text-purple-800 dark:text-purple-200">AI 코칭</span>
+                <span className="font-medium text-purple-800 dark:text-purple-200">
+                  AI 코칭
+                </span>
               </div>
               <div className="text-sm text-purple-700 dark:text-purple-300 mb-3">
                 집중도: {aiInsights.latest_insight.focus_score}/10
@@ -896,7 +1028,17 @@ const Sidebar = ({ isOpen, activeView, onViewChange, user, aiInsights, focusSess
 };
 
 // 헤더 컴포넌트
-const Header = ({ user, theme, sidebarOpen, onToggleSidebar, onToggleTheme, onOpenCommandPalette, onOpenAIChat, onLogout, notifications }) => {
+const Header = ({
+  user,
+  theme,
+  sidebarOpen,
+  onToggleSidebar,
+  onToggleTheme,
+  onOpenCommandPalette,
+  onOpenAIChat,
+  onLogout,
+  notifications,
+}) => {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
 
   return (
@@ -909,7 +1051,7 @@ const Header = ({ user, theme, sidebarOpen, onToggleSidebar, onToggleTheme, onOp
           >
             <Menu className="w-5 h-5" />
           </button>
-          
+
           <div className="flex items-center gap-2 text-sm text-gray-500">
             <span>안녕하세요, {user?.username}님! 👋</span>
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
@@ -924,7 +1066,9 @@ const Header = ({ user, theme, sidebarOpen, onToggleSidebar, onToggleTheme, onOp
           >
             <Search className="w-4 h-4" />
             <span className="text-sm text-gray-500">빠른 검색</span>
-            <kbd className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded text-xs">⌘K</kbd>
+            <kbd className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded text-xs">
+              ⌘K
+            </kbd>
           </button>
 
           <button
@@ -940,14 +1084,20 @@ const Header = ({ user, theme, sidebarOpen, onToggleSidebar, onToggleTheme, onOp
             onClick={onToggleTheme}
             className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
           >
-            {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
+            {theme === "light" ? (
+              <Moon className="w-5 h-5" />
+            ) : (
+              <Sun className="w-5 h-5" />
+            )}
           </button>
 
           <button className="relative p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors">
             <Bell className="w-5 h-5" />
             {notifications.length > 0 && (
               <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center">
-                <span className="text-xs text-white font-bold">{notifications.length}</span>
+                <span className="text-xs text-white font-bold">
+                  {notifications.length}
+                </span>
               </div>
             )}
           </button>
@@ -968,7 +1118,9 @@ const Header = ({ user, theme, sidebarOpen, onToggleSidebar, onToggleTheme, onOp
             {profileMenuOpen && (
               <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-2 z-50">
                 <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700">
-                  <p className="font-medium text-gray-900 dark:text-white">{user?.username}</p>
+                  <p className="font-medium text-gray-900 dark:text-white">
+                    {user?.username}
+                  </p>
                   <p className="text-sm text-gray-500">{user?.email}</p>
                 </div>
                 <button className="w-full px-3 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
@@ -980,7 +1132,7 @@ const Header = ({ user, theme, sidebarOpen, onToggleSidebar, onToggleTheme, onOp
                   설정
                 </button>
                 <hr className="my-2 border-gray-200 dark:border-gray-700" />
-                <button 
+                <button
                   onClick={onLogout}
                   className="w-full px-3 py-2 text-left hover:bg-red-50 dark:hover:bg-red-900 text-red-600 dark:text-red-400 flex items-center gap-2"
                 >
@@ -997,15 +1149,27 @@ const Header = ({ user, theme, sidebarOpen, onToggleSidebar, onToggleTheme, onOp
 };
 
 // 대시보드 컴포넌트
-const Dashboard = ({ data, notes, tasks, events, aiInsights, onCreateNote, onCreateTask, onUpdateTask }) => {
+const LocalDashboard = ({
+  data,
+  notes,
+  tasks,
+  events,
+  aiInsights,
+  onCreateNote,
+  onCreateTask,
+  onUpdateTask,
+}) => {
   const stats = useMemo(() => {
-    if (!data?.stats) return { total_tasks: 0, completed_tasks: 0, completion_rate: 0 };
+    if (!data?.stats)
+      return { total_tasks: 0, completed_tasks: 0, completion_rate: 0 };
     return data.stats;
   }, [data]);
 
   const todayEvents = useMemo(() => {
     const today = new Date().toDateString();
-    return events.filter(event => new Date(event.start_time).toDateString() === today);
+    return events.filter(
+      (event) => new Date(event.start_time).toDateString() === today
+    );
   }, [events]);
 
   return (
@@ -1067,26 +1231,36 @@ const Dashboard = ({ data, notes, tasks, events, aiInsights, onCreateNote, onCre
                 모두 보기
               </button>
             </div>
-            
+
             <div className="space-y-4">
-              {notes.slice(0, 3).map(note => (
-                <div key={note.id} className="flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700">
+              {notes.slice(0, 3).map((note) => (
+                <div
+                  key={note.id}
+                  className="flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+                >
                   <div className="p-2 bg-blue-100 dark:bg-blue-900 rounded-lg">
                     <Edit className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                   </div>
                   <div className="flex-1">
-                    <h4 className="font-medium text-gray-900 dark:text-white">{note.title}</h4>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">{note.content}</p>
+                    <h4 className="font-medium text-gray-900 dark:text-white">
+                      {note.title}
+                    </h4>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
+                      {note.content}
+                    </p>
                     <div className="flex items-center gap-2 mt-2">
-                      {note.tags?.map(tag => (
-                        <span key={tag} className="px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded-full text-xs">
+                      {note.tags?.map((tag) => (
+                        <span
+                          key={tag}
+                          className="px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded-full text-xs"
+                        >
                           #{tag}
                         </span>
                       ))}
                     </div>
                   </div>
                   <span className="text-xs text-gray-500">
-                    {new Date(note.updated_at).toLocaleDateString('ko-KR')}
+                    {new Date(note.updated_at).toLocaleDateString("ko-KR")}
                   </span>
                 </div>
               ))}
@@ -1101,14 +1275,16 @@ const Dashboard = ({ data, notes, tasks, events, aiInsights, onCreateNote, onCre
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
             오늘의 일정
           </h3>
-          <button 
-            onClick={() => onCreateTask({ title: '새 작업', priority: 'medium' })}
+          <button
+            onClick={() =>
+              onCreateTask({ title: "새 작업", priority: "medium" })
+            }
             className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
           >
             작업 추가
           </button>
         </div>
-        
+
         {todayEvents.length === 0 ? (
           <div className="text-center py-8">
             <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-4" />
@@ -1116,27 +1292,32 @@ const Dashboard = ({ data, notes, tasks, events, aiInsights, onCreateNote, onCre
           </div>
         ) : (
           <div className="space-y-3">
-            {todayEvents.map(event => (
-              <div key={event.id} className="flex items-center gap-4 p-3 border border-gray-200 dark:border-gray-600 rounded-lg">
-                <div 
+            {todayEvents.map((event) => (
+              <div
+                key={event.id}
+                className="flex items-center gap-4 p-3 border border-gray-200 dark:border-gray-600 rounded-lg"
+              >
+                <div
                   className="w-3 h-3 rounded-full"
                   style={{ backgroundColor: event.color }}
                 ></div>
                 <div className="flex-1">
-                  <h4 className="font-medium text-gray-900 dark:text-white">{event.title}</h4>
+                  <h4 className="font-medium text-gray-900 dark:text-white">
+                    {event.title}
+                  </h4>
                   <p className="text-sm text-gray-600 dark:text-gray-400">
-                    {new Date(event.start_time).toLocaleTimeString('ko-KR', { 
-                      hour: '2-digit', 
-                      minute: '2-digit' 
-                    })} - {new Date(event.end_time).toLocaleTimeString('ko-KR', { 
-                      hour: '2-digit', 
-                      minute: '2-digit' 
+                    {new Date(event.start_time).toLocaleTimeString("ko-KR", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}{" "}
+                    -{" "}
+                    {new Date(event.end_time).toLocaleTimeString("ko-KR", {
+                      hour: "2-digit",
+                      minute: "2-digit",
                     })}
                   </p>
                 </div>
-                {event.is_online && (
-                  <Globe className="w-4 h-4 text-blue-500" />
-                )}
+                {event.is_online && <Globe className="w-4 h-4 text-blue-500" />}
               </div>
             ))}
           </div>
@@ -1150,14 +1331,14 @@ const Dashboard = ({ data, notes, tasks, events, aiInsights, onCreateNote, onCre
           description="아이디어를 즉시 기록하세요"
           icon={Edit}
           color="blue"
-          onClick={() => onCreateNote({ title: '새 노트', content: '' })}
+          onClick={() => onCreateNote({ title: "새 노트", content: "" })}
         />
         <QuickActionCard
           title="작업 추가"
           description="새로운 할 일을 등록하세요"
           icon={PlusCircle}
           color="green"
-          onClick={() => onCreateTask({ title: '새 작업', priority: 'medium' })}
+          onClick={() => onCreateTask({ title: "새 작업", priority: "medium" })}
         />
         <QuickActionCard
           title="집중 모드"
@@ -1174,22 +1355,32 @@ const Dashboard = ({ data, notes, tasks, events, aiInsights, onCreateNote, onCre
 // 통계 카드 컴포넌트
 const StatCard = ({ title, value, change, icon: Icon, color = "blue" }) => {
   const colorClasses = {
-    blue: 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400',
-    green: 'bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-400',
-    yellow: 'bg-yellow-100 dark:bg-yellow-900 text-yellow-600 dark:text-yellow-400',
-    purple: 'bg-purple-100 dark:bg-purple-900 text-purple-600 dark:text-purple-400',
-    red: 'bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-400'
+    blue: "bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400",
+    green: "bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-400",
+    yellow:
+      "bg-yellow-100 dark:bg-yellow-900 text-yellow-600 dark:text-yellow-400",
+    purple:
+      "bg-purple-100 dark:bg-purple-900 text-purple-600 dark:text-purple-400",
+    red: "bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-400",
   };
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm font-medium text-gray-600 dark:text-gray-400">{title}</p>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{value}</p>
+          <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+            {title}
+          </p>
+          <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
+            {value}
+          </p>
           {change && (
-            <p className={`text-sm mt-1 ${change > 0 ? 'text-green-600' : 'text-red-600'}`}>
-              {change > 0 ? '↗' : '↘'} {Math.abs(change)}%
+            <p
+              className={`text-sm mt-1 ${
+                change > 0 ? "text-green-600" : "text-red-600"
+              }`}
+            >
+              {change > 0 ? "↗" : "↘"} {Math.abs(change)}%
             </p>
           )}
         </div>
@@ -1208,7 +1399,9 @@ const AIInsightPanel = ({ aiInsights }) => {
       <div className="bg-gradient-to-br from-purple-50 to-blue-50 dark:from-purple-900 dark:to-blue-900 rounded-xl p-6 border border-purple-200 dark:border-purple-700">
         <div className="text-center py-8">
           <Brain className="w-12 h-12 text-purple-400 mx-auto mb-4" />
-          <p className="text-purple-600 dark:text-purple-400">AI 인사이트 생성 중...</p>
+          <p className="text-purple-600 dark:text-purple-400">
+            AI 인사이트 생성 중...
+          </p>
         </div>
       </div>
     );
@@ -1223,25 +1416,37 @@ const AIInsightPanel = ({ aiInsights }) => {
           <Brain className="w-6 h-6 text-purple-600 dark:text-purple-400" />
         </div>
         <div>
-          <h3 className="font-semibold text-gray-900 dark:text-white">AI 생산성 코치</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400">개인 맞춤 인사이트</p>
+          <h3 className="font-semibold text-gray-900 dark:text-white">
+            AI 생산성 코치
+          </h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            개인 맞춤 인사이트
+          </p>
         </div>
       </div>
 
       <div className="space-y-4">
         <div>
-          <h4 className="font-medium text-gray-900 dark:text-white mb-2">오늘의 요약</h4>
-          <p className="text-gray-600 dark:text-gray-400 text-sm">{insight.daily_summary}</p>
+          <h4 className="font-medium text-gray-900 dark:text-white mb-2">
+            오늘의 요약
+          </h4>
+          <p className="text-gray-600 dark:text-gray-400 text-sm">
+            {insight.daily_summary}
+          </p>
         </div>
 
         {insight.suggestions && (
           <div>
-            <h4 className="font-medium text-gray-900 dark:text-white mb-2">추천 사항</h4>
+            <h4 className="font-medium text-gray-900 dark:text-white mb-2">
+              추천 사항
+            </h4>
             <div className="space-y-2">
               {insight.suggestions.slice(0, 3).map((suggestion, index) => (
                 <div key={index} className="flex items-start gap-2">
                   <Sparkles className="w-4 h-4 text-purple-500 mt-0.5 flex-shrink-0" />
-                  <p className="text-sm text-gray-600 dark:text-gray-400">{suggestion}</p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    {suggestion}
+                  </p>
                 </div>
               ))}
             </div>
@@ -1253,13 +1458,17 @@ const AIInsightPanel = ({ aiInsights }) => {
             <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">
               {insight.focus_score}/10
             </div>
-            <div className="text-sm text-gray-600 dark:text-gray-400">집중도</div>
+            <div className="text-sm text-gray-600 dark:text-gray-400">
+              집중도
+            </div>
           </div>
           <div className="text-center">
             <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
               {insight.productivity_trend}
             </div>
-            <div className="text-sm text-gray-600 dark:text-gray-400">트렌드</div>
+            <div className="text-sm text-gray-600 dark:text-gray-400">
+              트렌드
+            </div>
           </div>
         </div>
 
@@ -1272,11 +1481,19 @@ const AIInsightPanel = ({ aiInsights }) => {
 };
 
 // 빠른 액션 카드
-const QuickActionCard = ({ title, description, icon: Icon, color, onClick }) => {
+const QuickActionCard = ({
+  title,
+  description,
+  icon: Icon,
+  color,
+  onClick,
+}) => {
   const colorClasses = {
-    blue: 'bg-blue-50 dark:bg-blue-900 hover:bg-blue-100 dark:hover:bg-blue-800 text-blue-600',
-    green: 'bg-green-50 dark:bg-green-900 hover:bg-green-100 dark:hover:bg-green-800 text-green-600',
-    purple: 'bg-purple-50 dark:bg-purple-900 hover:bg-purple-100 dark:hover:bg-purple-800 text-purple-600'
+    blue: "bg-blue-50 dark:bg-blue-900 hover:bg-blue-100 dark:hover:bg-blue-800 text-blue-600",
+    green:
+      "bg-green-50 dark:bg-green-900 hover:bg-green-100 dark:hover:bg-green-800 text-green-600",
+    purple:
+      "bg-purple-50 dark:bg-purple-900 hover:bg-purple-100 dark:hover:bg-purple-800 text-purple-600",
   };
 
   return (
@@ -1289,8 +1506,12 @@ const QuickActionCard = ({ title, description, icon: Icon, color, onClick }) => 
           <Icon className="w-6 h-6" />
         </div>
         <div className="text-left">
-          <h3 className="font-semibold text-gray-900 dark:text-white">{title}</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400">{description}</p>
+          <h3 className="font-semibold text-gray-900 dark:text-white">
+            {title}
+          </h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {description}
+          </p>
         </div>
       </div>
     </button>
@@ -1302,19 +1523,25 @@ const NotesView = ({ notes, onCreateNote, onSyncToNotion }) => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-3xl font-bold text-gray-900 dark:text-white">노트</h2>
+        <h2 className="text-3xl font-bold text-gray-900 dark:text-white">
+          노트
+        </h2>
         <button
-          onClick={() => onCreateNote({ title: '새 노트', content: '' })}
+          onClick={() => onCreateNote({ title: "새 노트", content: "" })}
           className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
         >
           새 노트
         </button>
       </div>
-      
+
       <div className="text-center py-16">
         <Edit className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-        <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">노트 기능 구현 중</h3>
-        <p className="text-gray-600 dark:text-gray-400">곧 완전한 노트 관리 기능을 제공할 예정입니다.</p>
+        <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+          노트 기능 구현 중
+        </h3>
+        <p className="text-gray-600 dark:text-gray-400">
+          곧 완전한 노트 관리 기능을 제공할 예정입니다.
+        </p>
       </div>
     </div>
   );
@@ -1324,19 +1551,25 @@ const TasksView = ({ tasks, onCreateTask, onUpdateTask }) => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-3xl font-bold text-gray-900 dark:text-white">작업 관리</h2>
+        <h2 className="text-3xl font-bold text-gray-900 dark:text-white">
+          작업 관리
+        </h2>
         <button
-          onClick={() => onCreateTask({ title: '새 작업', priority: 'medium' })}
+          onClick={() => onCreateTask({ title: "새 작업", priority: "medium" })}
           className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
         >
           작업 추가
         </button>
       </div>
-      
+
       <div className="text-center py-16">
         <CheckCircle className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-        <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">작업 관리 기능 구현 중</h3>
-        <p className="text-gray-600 dark:text-gray-400">곧 완전한 작업 관리 기능을 제공할 예정입니다.</p>
+        <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+          작업 관리 기능 구현 중
+        </h3>
+        <p className="text-gray-600 dark:text-gray-400">
+          곧 완전한 작업 관리 기능을 제공할 예정입니다.
+        </p>
       </div>
     </div>
   );
@@ -1346,19 +1579,25 @@ const CalendarView = ({ events, onCreateEvent }) => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-3xl font-bold text-gray-900 dark:text-white">캘린더</h2>
+        <h2 className="text-3xl font-bold text-gray-900 dark:text-white">
+          캘린더
+        </h2>
         <button
-          onClick={() => onCreateEvent({ title: '새 이벤트' })}
+          onClick={() => onCreateEvent({ title: "새 이벤트" })}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
         >
           이벤트 추가
         </button>
       </div>
-      
+
       <div className="text-center py-16">
         <Calendar className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-        <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">캘린더 기능 구현 중</h3>
-        <p className="text-gray-600 dark:text-gray-400">곧 완전한 캘린더 기능을 제공할 예정입니다.</p>
+        <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+          캘린더 기능 구현 중
+        </h3>
+        <p className="text-gray-600 dark:text-gray-400">
+          곧 완전한 캘린더 기능을 제공할 예정입니다.
+        </p>
       </div>
     </div>
   );
@@ -1367,26 +1606,41 @@ const CalendarView = ({ events, onCreateEvent }) => {
 const AnalyticsView = ({ analytics }) => {
   return (
     <div className="space-y-6">
-      <h2 className="text-3xl font-bold text-gray-900 dark:text-white">생산성 분석</h2>
-      
+      <h2 className="text-3xl font-bold text-gray-900 dark:text-white">
+        생산성 분석
+      </h2>
+
       <div className="text-center py-16">
         <BarChart3 className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-        <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">분석 기능 준비 중</h3>
-        <p className="text-gray-600 dark:text-gray-400">곧 더 자세한 생산성 분석을 제공할 예정입니다.</p>
+        <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+          분석 기능 준비 중
+        </h3>
+        <p className="text-gray-600 dark:text-gray-400">
+          곧 더 자세한 생산성 분석을 제공할 예정입니다.
+        </p>
       </div>
     </div>
   );
 };
 
 // 포커스 타이머 컴포넌트
-const FocusTimer = ({ session, timer, isRunning, onToggle, onComplete, formatTime }) => {
-  const progress = (timer / 60) / session.planned_duration * 100;
-  const remainingTime = (session.planned_duration * 60) - timer;
+const FocusTimer = ({
+  session,
+  timer,
+  isRunning,
+  onToggle,
+  onComplete,
+  formatTime,
+}) => {
+  const progress = (timer / 60 / session.planned_duration) * 100;
+  const remainingTime = session.planned_duration * 60 - timer;
 
   return (
     <div className="fixed bottom-6 right-6 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 p-6 w-80 z-50">
       <div className="text-center mb-4">
-        <h3 className="font-semibold text-gray-900 dark:text-white mb-2">집중 세션</h3>
+        <h3 className="font-semibold text-gray-900 dark:text-white mb-2">
+          집중 세션
+        </h3>
         <div className="text-3xl font-bold text-purple-600">
           {formatTime(remainingTime > 0 ? remainingTime : timer)}
         </div>
@@ -1409,10 +1663,14 @@ const FocusTimer = ({ session, timer, isRunning, onToggle, onComplete, formatTim
           onClick={onToggle}
           className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center justify-center gap-2"
         >
-          {isRunning ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-          {isRunning ? '일시정지' : '시작'}
+          {isRunning ? (
+            <Pause className="w-4 h-4" />
+          ) : (
+            <Play className="w-4 h-4" />
+          )}
+          {isRunning ? "일시정지" : "시작"}
         </button>
-        
+
         <button
           onClick={() => onComplete(5)}
           className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
@@ -1425,11 +1683,18 @@ const FocusTimer = ({ session, timer, isRunning, onToggle, onComplete, formatTim
 };
 
 // AI 채팅 패널
-const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, input, onInputChange }) => {
+const AIChatPanel = ({
+  isOpen,
+  onClose,
+  messages,
+  onSendMessage,
+  input,
+  onInputChange,
+}) => {
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   if (!isOpen) return null;
@@ -1439,7 +1704,9 @@ const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, input, onInputC
       <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center gap-2">
           <Brain className="w-5 h-5 text-purple-600" />
-          <h3 className="font-semibold text-gray-900 dark:text-white">AI 어시스턴트</h3>
+          <h3 className="font-semibold text-gray-900 dark:text-white">
+            AI 어시스턴트
+          </h3>
         </div>
         <button
           onClick={onClose}
@@ -1449,7 +1716,10 @@ const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, input, onInputC
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ height: 'calc(100vh - 140px)' }}>
+      <div
+        className="flex-1 overflow-y-auto p-4 space-y-4"
+        style={{ height: "calc(100vh - 140px)" }}
+      >
         {messages.length === 0 && (
           <div className="text-center py-8">
             <Brain className="w-12 h-12 text-purple-400 mx-auto mb-4" />
@@ -1458,42 +1728,44 @@ const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, input, onInputC
             </p>
           </div>
         )}
-        
+
         {messages.map((message, index) => (
           <div
             key={index}
-            className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : ''}`}
+            className={`flex gap-3 ${
+              message.role === "user" ? "justify-end" : ""
+            }`}
           >
-            {message.role === 'assistant' && (
+            {message.role === "assistant" && (
               <div className="w-8 h-8 bg-purple-100 dark:bg-purple-900 rounded-full flex items-center justify-center flex-shrink-0">
                 <Brain className="w-4 h-4 text-purple-600" />
               </div>
             )}
-            
+
             <div
               className={`max-w-[80%] p-3 rounded-lg ${
-                message.role === 'user'
-                  ? 'bg-purple-600 text-white ml-auto'
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
+                message.role === "user"
+                  ? "bg-purple-600 text-white ml-auto"
+                  : "bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white"
               }`}
             >
               <p className="text-sm whitespace-pre-wrap">{message.content}</p>
               <p className="text-xs opacity-70 mt-1">
-                {message.timestamp.toLocaleTimeString('ko-KR', { 
-                  hour: '2-digit', 
-                  minute: '2-digit' 
+                {message.timestamp.toLocaleTimeString("ko-KR", {
+                  hour: "2-digit",
+                  minute: "2-digit",
                 })}
               </p>
             </div>
-            
-            {message.role === 'user' && (
+
+            {message.role === "user" && (
               <div className="w-8 h-8 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center flex-shrink-0">
                 <User className="w-4 h-4 text-blue-600" />
               </div>
             )}
           </div>
         ))}
-        
+
         <div ref={messagesEndRef} />
       </div>
 
@@ -1528,35 +1800,43 @@ const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, input, onInputC
 };
 
 // 커맨드 팔레트
-const CommandPalette = ({ isOpen, onClose, onSearch, searchResults, onCreateNote, onCreateTask, onStartFocus }) => {
-  const [query, setQuery] = useState('');
+const CommandPalette = ({
+  isOpen,
+  onClose,
+  onSearch,
+  searchResults,
+  onCreateNote,
+  onCreateTask,
+  onStartFocus,
+}) => {
+  const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   const commands = [
-    { 
-      id: 'create-note', 
-      label: '새 노트 작성', 
-      icon: Edit, 
-      action: () => onCreateNote({ title: '새 노트', content: '' }),
-      category: '생성'
+    {
+      id: "create-note",
+      label: "새 노트 작성",
+      icon: Edit,
+      action: () => onCreateNote({ title: "새 노트", content: "" }),
+      category: "생성",
     },
-    { 
-      id: 'create-task', 
-      label: '새 작업 추가', 
-      icon: PlusCircle, 
-      action: () => onCreateTask({ title: '새 작업', priority: 'medium' }),
-      category: '생성'
+    {
+      id: "create-task",
+      label: "새 작업 추가",
+      icon: PlusCircle,
+      action: () => onCreateTask({ title: "새 작업", priority: "medium" }),
+      category: "생성",
     },
-    { 
-      id: 'start-focus', 
-      label: '집중 세션 시작', 
-      icon: Target, 
-      action: () => onStartFocus('pomodoro', 25),
-      category: '생산성'
-    }
+    {
+      id: "start-focus",
+      label: "집중 세션 시작",
+      icon: Target,
+      action: () => onStartFocus("pomodoro", 25),
+      category: "생산성",
+    },
   ];
 
-  const filteredCommands = commands.filter(cmd => 
+  const filteredCommands = commands.filter((cmd) =>
     cmd.label.toLowerCase().includes(query.toLowerCase())
   );
 
@@ -1569,14 +1849,16 @@ const CommandPalette = ({ isOpen, onClose, onSearch, searchResults, onCreateNote
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (!isOpen) return;
-      
-      if (e.key === 'ArrowDown') {
+
+      if (e.key === "ArrowDown") {
         e.preventDefault();
-        setSelectedIndex(prev => Math.min(prev + 1, filteredCommands.length - 1));
-      } else if (e.key === 'ArrowUp') {
+        setSelectedIndex((prev) =>
+          Math.min(prev + 1, filteredCommands.length - 1)
+        );
+      } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        setSelectedIndex(prev => Math.max(prev - 1, 0));
-      } else if (e.key === 'Enter') {
+        setSelectedIndex((prev) => Math.max(prev - 1, 0));
+      } else if (e.key === "Enter") {
         e.preventDefault();
         if (filteredCommands[selectedIndex]) {
           filteredCommands[selectedIndex].action();
@@ -1585,8 +1867,8 @@ const CommandPalette = ({ isOpen, onClose, onSearch, searchResults, onCreateNote
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, filteredCommands, selectedIndex, onClose]);
 
   if (!isOpen) return null;
@@ -1604,9 +1886,11 @@ const CommandPalette = ({ isOpen, onClose, onSearch, searchResults, onCreateNote
             className="flex-1 bg-transparent outline-none text-lg text-gray-900 dark:text-white placeholder-gray-500"
             autoFocus
           />
-          <kbd className="px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded text-sm">ESC</kbd>
+          <kbd className="px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded text-sm">
+            ESC
+          </kbd>
         </div>
-        
+
         <div className="p-2 max-h-80 overflow-y-auto">
           {!query && (
             <div className="space-y-1">
@@ -1621,9 +1905,9 @@ const CommandPalette = ({ isOpen, onClose, onSearch, searchResults, onCreateNote
                     onClose();
                   }}
                   className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-left ${
-                    index === selectedIndex 
-                      ? 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300'
-                      : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                    index === selectedIndex
+                      ? "bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300"
+                      : "hover:bg-gray-100 dark:hover:bg-gray-700"
                   }`}
                 >
                   <cmd.icon className="w-5 h-5 text-gray-400" />
@@ -1638,43 +1922,59 @@ const CommandPalette = ({ isOpen, onClose, onSearch, searchResults, onCreateNote
 
           {query && searchResults && (
             <div className="space-y-4">
-              {searchResults.results.notes && searchResults.results.notes.length > 0 && (
-                <div>
-                  <div className="px-3 py-2 text-xs font-medium text-gray-500 uppercase tracking-wide">
-                    노트 ({searchResults.results.notes.length})
-                  </div>
-                  {searchResults.results.notes.slice(0, 5).map(note => (
-                    <div key={note.id} className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <Edit className="w-4 h-4 text-gray-400" />
-                        <div>
-                          <div className="font-medium text-gray-900 dark:text-white">{note.title}</div>
-                          <div className="text-sm text-gray-500 line-clamp-1">{note.content}</div>
+              {searchResults.results.notes &&
+                searchResults.results.notes.length > 0 && (
+                  <div>
+                    <div className="px-3 py-2 text-xs font-medium text-gray-500 uppercase tracking-wide">
+                      노트 ({searchResults.results.notes.length})
+                    </div>
+                    {searchResults.results.notes.slice(0, 5).map((note) => (
+                      <div
+                        key={note.id}
+                        className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+                      >
+                        <div className="flex items-center gap-3">
+                          <Edit className="w-4 h-4 text-gray-400" />
+                          <div>
+                            <div className="font-medium text-gray-900 dark:text-white">
+                              {note.title}
+                            </div>
+                            <div className="text-sm text-gray-500 line-clamp-1">
+                              {note.content}
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+                    ))}
+                  </div>
+                )}
 
-              {searchResults.results.tasks && searchResults.results.tasks.length > 0 && (
-                <div>
-                  <div className="px-3 py-2 text-xs font-medium text-gray-500 uppercase tracking-wide">
-                    작업 ({searchResults.results.tasks.length})
-                  </div>
-                  {searchResults.results.tasks.slice(0, 5).map(task => (
-                    <div key={task.id} className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <CheckCircle className="w-4 h-4 text-gray-400" />
-                        <div>
-                          <div className="font-medium text-gray-900 dark:text-white">{task.title}</div>
-                          <div className="text-sm text-gray-500">{task.status}</div>
+              {searchResults.results.tasks &&
+                searchResults.results.tasks.length > 0 && (
+                  <div>
+                    <div className="px-3 py-2 text-xs font-medium text-gray-500 uppercase tracking-wide">
+                      작업 ({searchResults.results.tasks.length})
+                    </div>
+                    {searchResults.results.tasks.slice(0, 5).map((task) => (
+                      <div
+                        key={task.id}
+                        className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+                      >
+                        <div className="flex items-center gap-3">
+                          <CheckCircle className="w-4 h-4 text-gray-400" />
+                          <div>
+                            <div className="font-medium text-gray-900 dark:text-white">
+                              {task.title}
+                            </div>
+                            <div className="text-sm text-gray-500">
+                              {task.status}
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+                    ))}
+                  </div>
+                )}
 
               {searchResults.total_results === 0 && (
                 <div className="px-3 py-8 text-center text-gray-500">
@@ -1693,34 +1993,47 @@ const CommandPalette = ({ isOpen, onClose, onSearch, searchResults, onCreateNote
 const NotificationCenter = ({ notifications }) => {
   return (
     <div className="fixed top-4 right-4 z-50 space-y-2">
-      {notifications.slice(0, 5).map(notification => (
+      {notifications.slice(0, 5).map((notification) => (
         <div
           key={notification.id}
           className={`bg-white dark:bg-gray-800 border rounded-lg shadow-lg p-4 max-w-sm transition-all duration-300 ${
-            notification.type === 'success' ? 'border-green-200' :
-            notification.type === 'error' ? 'border-red-200' :
-            notification.type === 'warning' ? 'border-yellow-200' :
-            'border-blue-200'
+            notification.type === "success"
+              ? "border-green-200"
+              : notification.type === "error"
+              ? "border-red-200"
+              : notification.type === "warning"
+              ? "border-yellow-200"
+              : "border-blue-200"
           }`}
         >
           <div className="flex items-start gap-3">
-            <div className={`p-1 rounded-full ${
-              notification.type === 'success' ? 'bg-green-100 text-green-600' :
-              notification.type === 'error' ? 'bg-red-100 text-red-600' :
-              notification.type === 'warning' ? 'bg-yellow-100 text-yellow-600' :
-              'bg-blue-100 text-blue-600'
-            }`}>
-              {notification.type === 'success' ? <CheckCircle className="w-4 h-4" /> :
-               notification.type === 'error' ? <AlertCircle className="w-4 h-4" /> :
-               notification.type === 'warning' ? <AlertCircle className="w-4 h-4" /> :
-               <Bell className="w-4 h-4" />}
+            <div
+              className={`p-1 rounded-full ${
+                notification.type === "success"
+                  ? "bg-green-100 text-green-600"
+                  : notification.type === "error"
+                  ? "bg-red-100 text-red-600"
+                  : notification.type === "warning"
+                  ? "bg-yellow-100 text-yellow-600"
+                  : "bg-blue-100 text-blue-600"
+              }`}
+            >
+              {notification.type === "success" ? (
+                <CheckCircle className="w-4 h-4" />
+              ) : notification.type === "error" ? (
+                <AlertCircle className="w-4 h-4" />
+              ) : notification.type === "warning" ? (
+                <AlertCircle className="w-4 h-4" />
+              ) : (
+                <Bell className="w-4 h-4" />
+              )}
             </div>
             <div className="flex-1">
               <p className="text-sm font-medium text-gray-900 dark:text-white">
                 {notification.message}
               </p>
               <p className="text-xs text-gray-500 mt-1">
-                {notification.timestamp.toLocaleTimeString('ko-KR')}
+                {notification.timestamp.toLocaleTimeString("ko-KR")}
               </p>
             </div>
           </div>
@@ -1730,5 +2043,72 @@ const NotificationCenter = ({ notifications }) => {
   );
 };
 
-// 메인 앱 내보내기
+// 보호된 라우트 컴포넌트
+const ProtectedRoute = ({ children }) => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+
+  return user ? children : <Navigate to="/login" replace />;
+};
+
+// 공개 라우트 컴포넌트 (로그인한 사용자는 대시보드로 리다이렉트)
+const PublicRoute = ({ children }) => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+
+  return user ? <Navigate to="/dashboard" replace /> : children;
+};
+
+function App() {
+  return (
+    <AuthProvider>
+      <Router>
+        <div className="App">
+          <Routes>
+            {/* 공개 라우트 */}
+            <Route
+              path="/login"
+              element={
+                <PublicRoute>
+                  <Login />
+                </PublicRoute>
+              }
+            />
+            <Route
+              path="/register"
+              element={
+                <PublicRoute>
+                  <Register />
+                </PublicRoute>
+              }
+            />
+
+            {/* 보호된 라우트 */}
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* 기본 라우트 */}
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+
+            {/* 404 페이지 */}
+            <Route path="*" element={<Navigate to="/login" replace />} />
+          </Routes>
+        </div>
+      </Router>
+    </AuthProvider>
+  );
+}
 export default CortexApp;
+export { App };
